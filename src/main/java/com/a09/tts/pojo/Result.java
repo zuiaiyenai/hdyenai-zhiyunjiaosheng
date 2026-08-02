@@ -1,12 +1,9 @@
 package com.a09.tts.pojo;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
+
+
+
 public class Result {
     private Integer code;//响应码，1表示成功，0表示失败
     private String msg;//响应信息，描述字符串

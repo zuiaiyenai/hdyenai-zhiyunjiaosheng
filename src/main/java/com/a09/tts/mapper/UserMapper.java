@@ -4,6 +4,7 @@ import com.a09.tts.pojo.User;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -53,4 +54,7 @@ public interface UserMapper {
      */
     @Select("select password from user where username=#{username}")
     public String login(String username);
+
+    @Update("UPDATE user SET password = #{password} WHERE username = #{username}")
+    int updatePassword(String username, String password);
 }

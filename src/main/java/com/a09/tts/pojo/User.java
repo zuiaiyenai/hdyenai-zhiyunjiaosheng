@@ -1,23 +1,49 @@
 package com.a09.tts.pojo;
 
-import lombok.*;
-
-@Data
-@AllArgsConstructor
-@NoArgsConstructor
 public class User {
-    private Integer userId;//用户id
-    private String username;//用户名
-    private String password;//密码
-    private Boolean permission;//用户权限，0为普通用户，1为高级用户
+    private Integer userId;
+    private String username;
+    private String password;
+    private Boolean permission;
 
-    public User(String username, String password, Boolean permission) {
-        this.username=username;
-        this.password=password;
-        this.permission=permission;
+    public User() {
     }
 
-    public Object getPassword() {
+    public User(String username, String password, Boolean permission) {
+        this.username = username;
+        this.password = password;
+        this.permission = permission;
+    }
+
+    public Integer getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Integer userId) {
+        this.userId = userId;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getPassword() {
         return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
+    public Boolean getPermission() {
+        return permission;
+    }
+
+    public void setPermission(Boolean permission) {
+        this.permission = permission;
     }
 }

@@ -1,8 +1,10 @@
 package com.a09.tts.controller;
 
 
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.a09.tts.service.PPTService;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -21,9 +23,10 @@ import org.springframework.web.multipart.MultipartFile;
  */
 
 @RestController
-@Slf4j
 @RequestMapping("/courseware")
 public class PPTController {
+
+    private static final Logger log = LoggerFactory.getLogger(PPTController.class);
 
     @Autowired
     private PPTService pptService;

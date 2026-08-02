@@ -1,17 +1,20 @@
 package com.a09.tts.controller;
 
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.a09.tts.api.TtsRequest;
 import com.a09.tts.service.TTSService;
-import lombok.extern.slf4j.Slf4j;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
-@Slf4j
 @RestController
 @RequestMapping("/voice")
 public class TTSController {
+
+    private static final Logger log = LoggerFactory.getLogger(TTSController.class);
 
     @Autowired
     private TTSService ttsService;
@@ -24,10 +27,9 @@ public class TTSController {
      */
 
     @PostMapping("/synthesize")
-    public ResponseEntity<byte[]> textToSpeech(@RequestBody Map<String, Object> requestData) {
-        String text = (String) requestData.get("text");
-        String voice = (String) requestData.get("voice");
-        return ttsService.tts(text,voice);
+    public ResponseEntity<byte[]> textToSpeech(@Valid @RequestBody TtsRequest request) {
+        return ttsService.tts(request.text(), request.voice(), request.effectiveSpeed(),
+                request.effectivePitch(), request.effectiveRhythm());
     }
 
 }

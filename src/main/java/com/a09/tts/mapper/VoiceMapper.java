@@ -20,7 +20,9 @@ public interface VoiceMapper {
      * @param voice 包含声音样本的详细信息
      * @return 插入操作影响的行数，成功为1，失败为0
      */
-    @Insert("insert into voice (voice_name, application_scene) VALUES (#{voiceName}, #{applicationScene})")
+    @Insert("insert into voice (voice_name, application_scene, file_path, mime_type, public_visible, owner_username) " +
+            "VALUES (#{voiceName}, #{applicationScene}, #{filePath}, #{mimeType}, #{publicVisible}, #{ownerUsername})")
+    @Options(useGeneratedKeys = true, keyProperty = "voiceId")
     public int addVoiceSample(Voice voice);
 
     /**
@@ -29,16 +31,26 @@ public interface VoiceMapper {
      * @param voiceName 声音样本名称
      * @return 匹配的声音样本列表（支持重名或者多个匹配结果）
      */
-    @Select("select voice_id, voice_name, application_scene FROM voice where voice_name LIKE CONCAT('%', #{voiceName}, '%')")
+    @Select("select voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+            "FROM voice where voice_name LIKE CONCAT('%', #{voiceName}, '%')")
     public List<Voice> findVoiceByName(String voiceName);
+
+    @Select("select voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+            "FROM voice WHERE voice_name LIKE CONCAT('%', #{voiceName}, '%') " +
+            "AND (public_visible = 1 OR owner_username = #{username})")
+    List<Voice> findVisibleVoiceByName(String voiceName, String username);
 
     /**
      * 查询所有声音样本
      *
      * @return 声音样本的列表
      */
-    @Select("SELECT voice_id, voice_name, application_scene FROM voice")
+    @Select("SELECT voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at FROM voice")
     public List<Voice> findAllVoices();
+
+    @Select("SELECT voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+            "FROM voice WHERE public_visible = 1 OR owner_username = #{username}")
+    List<Voice> findVisibleVoices(String username);
 
     /**
      * 根据声音样本的 ID 删除声音样本
@@ -55,8 +67,13 @@ public interface VoiceMapper {
      * @param voice 包含需要更新的声音样本信息（必须包含 ID）
      * @return 更新操作影响的行数，1 为更新成功，0 为失败
      */
-    @Update("UPDATE voice SET voice_name = #{voiceName}, application_scene = #{applicationScene} where voice_id = #{voiceId}")
+    @Update("UPDATE voice SET voice_name = #{voiceName}, application_scene = #{applicationScene}, " +
+            "public_visible = #{publicVisible} where voice_id = #{voiceId}")
     public int updateVoiceSample(Voice voice);
+
+    @Select("SELECT voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+            "FROM voice WHERE voice_id = #{voiceId}")
+    Voice findVoiceById(int voiceId);
 }
 
 

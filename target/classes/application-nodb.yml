@@ -1,0 +1,75 @@
+spring:
+  application:
+    name: tts
+  data:
+    redis:
+      host: "${REDIS_HOST:127.0.0.1}"
+      port: "${REDIS_PORT:6379}"
+      password: "${REDIS_PASSWORD:123456}"
+      database: "${REDIS_DATABASE:9}"
+      connect-timeout: "${REDIS_CONNECT_TIMEOUT:1s}"
+      timeout: "${REDIS_TIMEOUT:2s}"
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
+      - org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+server:
+  port: 8081
+
+app:
+  redis:
+    enabled: "${REDIS_ENABLED:false}"
+    dialogue-session-ttl: "${REDIS_DIALOGUE_SESSION_TTL:30m}"
+  speaking-dir: ./uploads/speaking
+  video-dir: ./uploads/video
+  output-dir: ./uploads/output
+  ffmpeg-path: ffmpeg
+  accessibility-dir: ./uploads/accessibility
+  upload-dir: ./uploads/voice_samples
+  asr-dir: ./uploads/asr
+  ppt-dir: ./uploads/ppt
+  courseware-dir: ./uploads/courseware
+
+management:
+  health:
+    redis:
+      enabled: "${REDIS_ENABLED:false}"
+
+jwt:
+  secret: "${JWT_SECRET:development-only-secret-change-before-deploying}"
+  expiration-seconds: 7200
+
+security:
+  auth:
+    enabled: "${AUTH_ENABLED:true}"
+
+moonshot:
+  api:
+    key: "${MOONSHOT_API_KEY:sk-xvgKAvOt7SSc4tv8baFVEdEf7lpS1CiHN2sWNxcGVOuyCwqc}"
+    base-url: https://api.moonshot.cn/v1
+    model: "${MOONSHOT_API_MODEL:moonshot-v1-32k}"
+
+asr:
+  api:
+    url: "${ASR_API_URL:http://127.0.0.1:9977/asr}"
+    token: "${ASR_API_TOKEN:}"
+
+tts:
+  api:
+    url: "${TTS_API_URL:http://127.0.0.1:9966/tts}"
+  output-root: "${TTS_OUTPUT_ROOT:./uploads/output}"
+
+sound-clone:
+  api:
+    url: "${SOUND_CLONE_API_URL:http://127.0.0.1:9880/tts}"
+
+cosyvoice:
+  api:
+    url: "${COSYVOICE_API_URL:}"
+    key: "${COSYVOICE_API_KEY:}"

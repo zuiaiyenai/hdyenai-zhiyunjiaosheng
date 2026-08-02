@@ -1,0 +1,52 @@
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
+      - org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration
+
+app:
+  redis:
+    enabled: false
+  upload-dir: ./target/test-uploads/voice
+  asr-dir: ./target/test-uploads/asr
+  ppt-dir: ./target/test-uploads/ppt
+  courseware-dir: ./target/test-uploads/courseware
+  speaking-dir: ./target/test-uploads/speaking
+  video-dir: ./target/test-uploads/video
+  output-dir: ./target/test-uploads/output
+  accessibility-dir: ./target/test-uploads/accessibility
+  ffmpeg-path: ffmpeg
+
+jwt:
+  secret: test-secret-that-is-long-enough-for-automated-tests
+  expiration-seconds: 7200
+
+security:
+  auth:
+    enabled: false
+
+moonshot:
+  api:
+    key: ""
+    base-url: http://127.0.0.1:1
+    model: test-model
+
+asr:
+  api:
+    url: http://127.0.0.1:1/asr
+    token: ""
+
+tts:
+  api:
+    url: http://127.0.0.1:1/tts
+  output-root: ./target/test-uploads/output
+
+sound-clone:
+  api:
+    url: http://127.0.0.1:1/tts
+
+cosyvoice:
+  api:
+    url: ""
+    key: ""

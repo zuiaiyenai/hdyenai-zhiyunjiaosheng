@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智韵教声 - AI语音教学平台</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  background: #0a0e27;
+}
+
+/* ============ 主容器 ============ */
+.auth-wrapper {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* ============ 左侧品牌区 ============ */
+.brand-side {
+  flex: 1;
+  background: linear-gradient(160deg, #0f1337 0%, #1a1040 30%, #0d1b3e 60%, #0a0e27 100%);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 60px;
+  overflow: hidden;
+}
+
+/* 背景装饰圆 */
+.brand-side::before {
+  content: '';
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%);
+  top: -100px;
+  right: -150px;
+  border-radius: 50%;
+}
+.brand-side::after {
+  content: '';
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(139,92,246,0.10) 0%, transparent 70%);
+  bottom: -80px;
+  left: -120px;
+  border-radius: 50%;
+}
+
+/* 声波动画 */
+.wave-container {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  margin-bottom: 40px;
+}
+
+.wave-circle {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(99,102,241,0.3);
+  border-radius: 50%;
+  animation: wave-pulse 3s ease-in-out infinite;
+}
+.wave-circle:nth-child(1) { animation-delay: 0s; }
+.wave-circle:nth-child(2) { animation-delay: 0.6s; }
+.wave-circle:nth-child(3) { animation-delay: 1.2s; }
+
+@keyframes wave-pulse {
+  0%, 100% { transform: scale(0.8); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.2; }
+}
+
+.brand-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  z-index: 1;
+}
+
+.brand-title {
+  font-size: 40px;
+  font-weight: 800;
+  color: #fff;
+  text-align: center;
+  z-index: 1;
+  background: linear-gradient(135deg, #e0e7ff 0%, #a5b4fc 50%, #818cf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 6px;
+  margin-bottom: 12px;
+}
+
+.brand-subtitle {
+  font-size: 16px;
+  color: rgba(255,255,255,0.5);
+  text-align: center;
+  z-index: 1;
+  letter-spacing: 4px;
+  font-weight: 300;
+  margin-bottom: 60px;
+}
+
+/* 特性列表 */
+.features {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: rgba(255,255,255,0.7);
+  font-size: 14px;
+  font-weight: 400;
+  opacity: 0;
+  animation: fadeInUp 0.6s ease forwards;
+}
+.feature-item:nth-child(1) { animation-delay: 0.3s; }
+.feature-item:nth-child(2) { animation-delay: 0.5s; }
+.feature-item:nth-child(3) { animation-delay: 0.7s; }
+
+@keyframes fadeInUp {
+  to { opacity: 1; transform: translateY(0); }
+}
+.feature-item { transform: translateY(10px); }
+
+.feature-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(99,102,241,0.15);
+  border: 1px solid rgba(99,102,241,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.feature-text span { display: block; }
+.feature-text .label { color: rgba(255,255,255,0.9); font-weight: 500; font-size: 14px; }
+.feature-text .desc { color: rgba(255,255,255,0.4); font-size: 12px; margin-top: 2px; }
+
+/* ============ 右侧表单区 ============ */
+.form-side {
+  width: 520px;
+  min-width: 520px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 60px 48px;
+  position: relative;
+}
+
+.form-side::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6, #a78bfa, #6366f1);
+  background-size: 300% 100%;
+  animation: gradientShimmer 3s ease infinite;
+}
+
+@keyframes gradientShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.form-header {
+  margin-bottom: 36px;
+}
+
+.form-header h2 {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 8px;
+}
+
+.form-header p {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+/* ============ Tab 切换 ============ */
+.tab-group {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 32px;
+  position: relative;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 12px 0;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: all 0.3s ease;
+  position: relative;
+  z-index: 1;
+}
+
+.tab-btn.active {
+  color: #fff;
+  background: #6366f1;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+}
+
+/* ============ 表单 ============ */
+.form-container {
+  display: none;
+  animation: formSlideIn 0.4s ease;
+}
+.form-container.active { display: block; }
+
+@keyframes formSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.input-group {
+  margin-bottom: 20px;
+}
+
+.input-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.input-wrapper {
+  position: relative;
+}
+
+.input-wrapper .input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.input-wrapper input {
+  width: 100%;
+  padding: 12px 14px 12px 42px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #0f172a;
+  background: #f8fafc;
+  transition: all 0.25s ease;
+  outline: none;
+  font-family: inherit;
+}
+
+.input-wrapper input:focus {
+  border-color: #6366f1;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(99,102,241,0.1);
+}
+
+.input-wrapper input::placeholder {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.input-wrapper input.error {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+/* ============ 提交按钮 ============ */
+.submit-btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  margin-top: 8px;
+  font-family: inherit;
+}
+
+.submit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(99,102,241,0.35);
+}
+
+.submit-btn:active {
+  transform: translateY(0);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 加载状态 */
+.submit-btn .btn-text { display: inline; }
+.submit-btn .btn-loading { display: none; }
+.submit-btn.loading .btn-text { display: none; }
+.submit-btn.loading .btn-loading { display: inline-flex; align-items: center; gap: 8px; }
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============ 消息提示 ============ */
+.message-box {
+  display: none;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease;
+}
+.message-box.show { display: flex; align-items: center; gap: 8px; }
+.message-box.success { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.message-box.error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.message-box.info { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ============ 底部链接 ============ */
+.form-footer {
+  text-align: center;
+  margin-top: 28px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.form-footer a {
+  color: #6366f1;
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ============ 响应式 ============ */
+@media (max-width: 900px) {
+  .brand-side { display: none; }
+  .form-side {
+    width: 100%;
+    min-width: unset;
+    padding: 40px 28px;
+  }
+}
+
+@media (max-width: 480px) {
+  .form-side { padding: 28px 20px; }
+  .form-header h2 { font-size: 22px; }
+}
+</style>
+</head>
+<body>
+<div class="auth-wrapper">
+  <!-- 左侧品牌区 -->
+  <div class="brand-side">
+    <div class="wave-container">
+      <div class="wave-circle"></div>
+      <div class="wave-circle"></div>
+      <div class="wave-circle"></div>
+      <div class="brand-icon">🎙️</div>
+    </div>
+    <div class="brand-title">智韵教声</div>
+    <div class="brand-subtitle">AI 语音教学平台</div>
+    <div class="features">
+      <div class="feature-item">
+        <div class="feature-icon">🔊</div>
+        <div class="feature-text">
+          <span class="label">语音合成 TTS</span>
+          <span class="desc">多种音色 &amp; 方言 &amp; 情感表达</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🎤</div>
+        <div class="feature-text">
+          <span class="label">语音识别 ASR</span>
+          <span class="desc">高精度转写 &amp; 实时评测</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">✨</div>
+        <div class="feature-text">
+          <span class="label">AI 教学辅助</span>
+          <span class="desc">智能评测 &amp; 口语练习 &amp; PPT总结</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧表单区 -->
+  <div class="form-side">
+    <div class="form-header">
+      <h2 id="formTitle">欢迎回来</h2>
+      <p id="formSubtitle">登录以继续使用智韵教声平台</p>
+    </div>
+
+    <div id="messageBox" class="message-box"></div>
+
+    <!-- Tab 切换 -->
+    <div class="tab-group">
+      <button class="tab-btn active" data-tab="login" onclick="switchTab('login')">登录</button>
+      <button class="tab-btn" data-tab="register" onclick="switchTab('register')">注册</button>
+    </div>
+
+    <!-- 登录表单 -->
+    <div class="form-container active" id="loginForm">
+      <div class="input-group">
+        <label>用户名</label>
+        <div class="input-wrapper">
+          <span class="input-icon">👤</span>
+          <input type="text" id="login-username" placeholder="请输入用户名" autocomplete="username">
+        </div>
+      </div>
+      <div class="input-group">
+        <label>密码</label>
+        <div class="input-wrapper">
+          <span class="input-icon">🔒</span>
+          <input type="password" id="login-password" placeholder="请输入密码" autocomplete="current-password">
+        </div>
+      </div>
+      <button class="submit-btn" id="loginBtn" onclick="handleLogin()">
+        <span class="btn-text">登 录</span>
+        <span class="btn-loading"><span class="spinner"></span>登录中...</span>
+      </button>
+      <div class="form-footer">
+        还没有账号？<a onclick="switchTab('register')">立即注册</a>
+        <br><br>
+        <span style="color:#94a3b8;font-size:12px;">演示账号: admin / admin123</span>
+      </div>
+    </div>
+
+    <!-- 注册表单 -->
+    <div class="form-container" id="registerForm">
+      <div class="input-group">
+        <label>用户名</label>
+        <div class="input-wrapper">
+          <span class="input-icon">👤</span>
+          <input type="text" id="reg-username" placeholder="请输入用户名" autocomplete="username">
+        </div>
+      </div>
+      <div class="input-group">
+        <label>密码</label>
+        <div class="input-wrapper">
+          <span class="input-icon">🔒</span>
+          <input type="password" id="reg-password" placeholder="至少6位密码" autocomplete="new-password">
+        </div>
+      </div>
+      <div class="input-group">
+        <label>确认密码</label>
+        <div class="input-wrapper">
+          <span class="input-icon">✓</span>
+          <input type="password" id="reg-confirm" placeholder="再次输入密码" autocomplete="new-password">
+        </div>
+      </div>
+      <button class="submit-btn" id="regBtn" onclick="handleRegister()">
+        <span class="btn-text">注 册</span>
+        <span class="btn-loading"><span class="spinner"></span>注册中...</span>
+      </button>
+      <div class="form-footer">
+        已有账号？<a onclick="switchTab('login')">立即登录</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE_URL = '';
+
+// Tab 切换
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('loginForm').classList.toggle('active', tab === 'login');
+  document.getElementById('registerForm').classList.toggle('active', tab === 'register');
+  document.getElementById('formTitle').textContent = tab === 'login' ? '欢迎回来' : '创建账号';
+  document.getElementById('formSubtitle').textContent = tab === 'login' ? '登录以继续使用智韵教声平台' : '注册后即可体验全部功能';
+  hideMessage();
+}
+
+// 显示消息
+function showMessage(msg, type) {
+  const mb = document.getElementById('messageBox');
+  mb.textContent = msg;
+  mb.className = 'message-box show ' + type;
+}
+function hideMessage() {
+  document.getElementById('messageBox').className = 'message-box';
+}
+
+// 设置按钮加载状态
+function setLoading(btnId, loading) {
+  const btn = document.getElementById(btnId);
+  btn.classList.toggle('loading', loading);
+  btn.disabled = loading;
+}
+
+// 登录
+async function handleLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!username || !password) {
+    showMessage('请输入用户名和密码', 'error');
+    return;
+  }
+  hideMessage();
+  setLoading('loginBtn', true);
+  try {
+    const res = await fetch(BASE_URL + '/user/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (data.code === 200) {
+      showMessage('登录成功，正在跳转...', 'success');
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('username', data.username);
+      setTimeout(() => { window.location.href = 'index.html'; }, 600);
+    } else {
+      showMessage(data.msg || '登录失败', 'error');
+    }
+  } catch(e) {
+    showMessage('网络错误：无法连接到服务器 (' + e.message + ')', 'error');
+  } finally {
+    setLoading('loginBtn', false);
+  }
+}
+
+// 注册
+async function handleRegister() {
+  const username = document.getElementById('reg-username').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const confirm = document.getElementById('reg-confirm').value;
+  if (!username || !password || !confirm) {
+    showMessage('请填写完整信息', 'error');
+    return;
+  }
+  if (password.length < 6) {
+    showMessage('密码长度不能少于6位', 'error');
+    return;
+  }
+  if (password !== confirm) {
+    showMessage('两次密码不一致', 'error');
+    return;
+  }
+  hideMessage();
+  setLoading('regBtn', true);
+  try {
+    const res = await fetch(BASE_URL + '/user/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (data.code === 201) {
+      showMessage('注册成功！请登录', 'success');
+      setTimeout(() => {
+        document.getElementById('login-username').value = username;
+        switchTab('login');
+      }, 800);
+    } else {
+      showMessage(data.msg || '注册失败', 'error');
+    }
+  } catch(e) {
+    showMessage('网络错误：无法连接到服务器 (' + e.message + ')', 'error');
+  } finally {
+    setLoading('regBtn', false);
+  }
+}
+
+// 回车键提交
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    if (document.getElementById('loginForm').classList.contains('active')) {
+      handleLogin();
+    } else {
+      handleRegister();
+    }
+  }
+});
+</script>
+</body>
+</html>

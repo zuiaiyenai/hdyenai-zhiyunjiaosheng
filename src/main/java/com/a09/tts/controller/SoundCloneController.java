@@ -1,7 +1,9 @@
 package com.a09.tts.controller;
 
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.a09.tts.service.SoundCloneService;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -17,12 +19,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import com.a09.tts.util.UploadUtils;
+import java.util.Set;
 
 
-@Slf4j
 @RestController
 @RequestMapping("/sound_clone")
 public class SoundCloneController {
+
+    private static final Logger log = LoggerFactory.getLogger(SoundCloneController.class);
 
     @Value("${app.upload-dir}")
     private String uploadDir;
@@ -57,26 +62,27 @@ public class SoundCloneController {
             //指定音频文件名
             String audioFileName = System.currentTimeMillis() + "_" + audioFile.getOriginalFilename();
             // 构建完整路径
-            Path audioFilePath = dirPath.resolve(audioFileName);
+            Path audioFilePath = UploadUtils.save(audioFile, dirPath,
+                    Set.of(".wav", ".mp3", ".m4a", ".flac", ".ogg"));
             // 保存文件
-            Files.copy(audioFile.getInputStream(), audioFilePath, StandardCopyOption.REPLACE_EXISTING);
 
             // 4. 调用api开始克隆
             ResponseEntity<byte[]> response = soundCloneService.soundClone(promptText, promptLang, text, textLang, audioFilePath.toString());
             if (response.getStatusCode() == HttpStatus.OK) {
                 //克隆成功以后删除用户上传的音频文件
-                audioFilePath.toFile().deleteOnExit();
+                Files.deleteIfExists(audioFilePath);
                 //从响应体中取出音频文件字节流
                 byte[] audioData = response.getBody();
                 //获取SoundCloneService中设置好的响应头，确保前端收到的是处理好的音频文件
                 HttpHeaders headers = response.getHeaders();
                 return new ResponseEntity<>(audioData, headers,HttpStatus.OK);
             } else {
-                return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+                Files.deleteIfExists(audioFilePath);
+                return new ResponseEntity<>(HttpStatus.SERVICE_UNAVAILABLE);
             }
 
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body("Upload failed: " + e.getMessage());
+            return ResponseEntity.internalServerError().body("Upload failed");
         }
     }
 
