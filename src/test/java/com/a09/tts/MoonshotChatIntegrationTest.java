@@ -12,6 +12,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MoonshotChatIntegrationTest {
@@ -76,5 +78,41 @@ class MoonshotChatIntegrationTest {
                 "generateCoursewareContent", "PPT正文");
 
         assertThat(result).isEqualTo("课件结果");
+    }
+
+    @Test
+    void coursewareGenerationRetriesAfterRateLimit() {
+        MoonshotChatClient client = mock(MoonshotChatClient.class);
+        when(client.generate(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenThrow(new IllegalStateException("429 rate_limit_reached_error"))
+                .thenReturn("重试后的课件结果");
+        PPTServiceImpl service = new PPTServiceImpl(mock(RestTemplate.class), client);
+        ReflectionTestUtils.setField(service, "rateLimitRetryDelayMs", 0L);
+
+        String result = ReflectionTestUtils.invokeMethod(service,
+                "generateCoursewareContent", "PPT正文");
+
+        assertThat(result).isEqualTo("重试后的课件结果");
+        verify(client, times(2)).generate(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void coursewareGenerationReturnsFriendlyMessageWhenRateLimitPersists() {
+        MoonshotChatClient client = mock(MoonshotChatClient.class);
+        when(client.generate(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenThrow(new IllegalStateException("Organization Rate limit exceeded, status 429"));
+        PPTServiceImpl service = new PPTServiceImpl(mock(RestTemplate.class), client);
+        ReflectionTestUtils.setField(service, "rateLimitRetryDelayMs", 0L);
+
+        String result = ReflectionTestUtils.invokeMethod(service,
+                "generateCoursewareContent", "PPT正文");
+
+        assertThat(result).isEqualTo("当前使用人数较多，AI 服务暂时繁忙，请稍后重试。");
+        assertThat(result).doesNotContain("429", "rate_limit");
+        verify(client, times(3)).generate(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
     }
 }

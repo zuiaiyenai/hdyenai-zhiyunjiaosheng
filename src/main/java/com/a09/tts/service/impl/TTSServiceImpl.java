@@ -138,7 +138,7 @@ public class TTSServiceImpl implements TTSService {
         ReferenceVoice reference = resolveReference(voice);
         return Map.ofEntries(
                 Map.entry("text", text),
-                Map.entry("text_lang", resolveTextLanguage(text, voice)),
+                Map.entry("text_lang", resolveTextLanguage(text)),
                 Map.entry("ref_audio_path", reference.path().toString().replace('\\', '/')),
                 Map.entry("aux_ref_audio_paths", List.of()),
                 Map.entry("prompt_lang", reference.promptLanguage()),
@@ -146,7 +146,7 @@ public class TTSServiceImpl implements TTSService {
                 Map.entry("top_k", 5),
                 Map.entry("top_p", 0.9),
                 Map.entry("temperature", 0.8),
-                Map.entry("text_split_method", "cut0"),
+                Map.entry("text_split_method", streaming ? "cut5" : "cut0"),
                 Map.entry("batch_size", 1),
                 Map.entry("speed_factor", speed),
                 Map.entry("pitch", pitch),
@@ -186,21 +186,29 @@ public class TTSServiceImpl implements TTSService {
         throw new IllegalArgumentException("找不到音色参考文件：" + voice);
     }
 
-    private void validate(String text, String voice) {
+    @Override
+    public void validate(String text, String voice) {
         if (text == null || text.isBlank() || text.length() > 5000) {
             throw new IllegalArgumentException("文本长度必须在 1 到 5000 字之间");
         }
         if (voice == null || voice.isBlank()) {
             throw new IllegalArgumentException("必须选择音色");
         }
+        validateBuiltInVoiceLanguage(text, voice);
     }
 
-    private String resolveTextLanguage(String text, String voice) {
-        return switch (voice) {
-            case "longxiao" -> "zh";
-            case "longxiao-en" -> "en";
-            default -> containsChinese(text) ? "zh" : "en";
-        };
+    private void validateBuiltInVoiceLanguage(String text, String voice) {
+        boolean chineseText = containsChinese(text);
+        if ("longxiao-en".equals(voice) && chineseText) {
+            throw new IllegalArgumentException("请输入英文");
+        }
+        if (("longxiao".equals(voice) || "default".equals(voice)) && !chineseText) {
+            throw new IllegalArgumentException("请输入中文");
+        }
+    }
+
+    private String resolveTextLanguage(String text) {
+        return containsChinese(text) ? "zh" : "en";
     }
 
     private boolean containsChinese(String text) {

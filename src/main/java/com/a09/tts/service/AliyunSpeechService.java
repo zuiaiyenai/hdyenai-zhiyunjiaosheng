@@ -17,6 +17,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,6 +66,40 @@ public class AliyunSpeechService {
             return audio.toByteArray();
         } catch (Exception exception) {
             throw new IllegalStateException("阿里云语音合成失败：" + exception.getMessage(), exception);
+        } finally {
+            if (synthesizer != null) {
+                synthesizer.close();
+            }
+            client.shutdown();
+        }
+    }
+
+    public void stream(String text, String voice, OutputStream outputStream) {
+        credentials.requireNlsConfiguration();
+        AtomicReference<String> failure = new AtomicReference<>();
+        AtomicReference<IOException> writeFailure = new AtomicReference<>();
+        NlsClient client = credentials.createNlsClient();
+        SpeechSynthesizer synthesizer = null;
+        try {
+            synthesizer = new SpeechSynthesizer(client, streamingListener(outputStream, failure, writeFailure));
+            synthesizer.setAppKey(credentials.appKey());
+            synthesizer.setText(text);
+            synthesizer.setFormat(OutputFormatEnum.MP3);
+            synthesizer.setSampleRate(SampleRateEnum.SAMPLE_RATE_24K);
+            synthesizer.setVoice(voice);
+            synthesizer.setVolume(50);
+            synthesizer.setPitchRate(0);
+            synthesizer.setSpeechRate(0);
+            synthesizer.start();
+            synthesizer.waitForComplete();
+            if (writeFailure.get() != null) {
+                throw writeFailure.get();
+            }
+            if (failure.get() != null) {
+                throw new IllegalStateException(failure.get());
+            }
+        } catch (Exception exception) {
+            throw new IllegalStateException("阿里云流式语音合成失败：" + exception.getMessage(), exception);
         } finally {
             if (synthesizer != null) {
                 synthesizer.close();
@@ -125,6 +161,35 @@ public class AliyunSpeechService {
                 byte[] bytes = new byte[message.remaining()];
                 message.get(bytes);
                 audio.write(bytes, 0, bytes.length);
+            }
+
+            @Override
+            public void onFail(SpeechSynthesizerResponse response) {
+                failure.set("taskId=" + response.getTaskId() + "，" + response.getStatusText());
+            }
+
+            @Override
+            public void onComplete(SpeechSynthesizerResponse response) { }
+        };
+    }
+
+    static SpeechSynthesizerListener streamingListener(OutputStream outputStream,
+                                                       AtomicReference<String> failure,
+                                                       AtomicReference<IOException> writeFailure) {
+        return new SpeechSynthesizerListener() {
+            @Override
+            public void onMessage(ByteBuffer message) {
+                if (writeFailure.get() != null) {
+                    return;
+                }
+                byte[] bytes = new byte[message.remaining()];
+                message.get(bytes);
+                try {
+                    outputStream.write(bytes);
+                    outputStream.flush();
+                } catch (IOException exception) {
+                    writeFailure.compareAndSet(null, exception);
+                }
             }
 
             @Override

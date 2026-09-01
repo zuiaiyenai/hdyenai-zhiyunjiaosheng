@@ -88,10 +88,96 @@
       activeAudio=new Audio(audioObjectUrl);
       await activeAudio.play();
     }catch(error){
+      window.voicePreviewLock?.finish();
       window.alert(error&&error.message?error.message:"试听失败");
     }finally{
       button.disabled=false;
       button.innerHTML=oldContent;
+    }
+  }
+  async function previewLibraryVoice(button,voice){
+    if(!requireLogin())return;
+    const config=apiConfig();
+    const oldContent=button.innerHTML;
+    button.disabled=true;
+    button.textContent="加载中…";
+    try{
+      const response=await fetch(config.baseUrl+"/voice_library/"+encodeURIComponent(voice.voiceId)+"/audio",{
+        headers:{Authorization:"Bearer "+config.token}
+      });
+      if(!response.ok)throw new Error(await apiError(response));
+      const blob=await response.blob();
+      if(activeAudio)activeAudio.pause();
+      if(audioObjectUrl)URL.revokeObjectURL(audioObjectUrl);
+      audioObjectUrl=URL.createObjectURL(blob);
+      activeAudio=new Audio(audioObjectUrl);
+      await activeAudio.play();
+    }catch(error){
+      window.voicePreviewLock?.finish();
+      window.alert(error&&error.message?error.message:"试听失败");
+    }finally{
+      button.disabled=false;
+      button.innerHTML=oldContent;
+    }
+  }
+  function renderVoiceRanking(side,voices,voiceLibraryButton){
+    side.querySelectorAll(":scope > .rank").forEach(item=>item.remove());
+    let more=side.querySelector(":scope > .more");
+    if(!more){
+      more=node("div","more");
+      side.appendChild(more);
+    }
+    more.replaceChildren();
+    const moreButton=node("button","rank-more","更多 →");
+    moreButton.type="button";
+    moreButton.addEventListener("click",()=>voiceLibraryButton.click());
+    more.appendChild(moreButton);
+
+    const playable=voices.filter(voice=>voice&&voice.voiceId!=null&&voice.filePath).slice(0,5);
+    if(!playable.length){
+      const empty=node("div","rank rank-status","样本库暂无可试听声音");
+      side.insertBefore(empty,more);
+      return;
+    }
+    playable.forEach((voice,index)=>{
+      const rank=node("div","rank");
+      const button=node("button","rank-preview");
+      button.type="button";
+      button.title="试听「"+(voice.voiceName||"未命名声音")+"」";
+      button.append(
+        node("b","",String(index+1)),
+        node("span","rank-name",voice.voiceName||"未命名声音"),
+        node("span","rank-play","▶"),
+        node("span","sr-only","试听")
+      );
+      button.addEventListener("click",()=>previewLibraryVoice(button,voice));
+      rank.appendChild(button);
+      side.insertBefore(rank,more);
+    });
+  }
+  async function loadVoiceRanking(voiceLibraryButton){
+    const side=document.querySelector("main > section.page .hero-grid .side");
+    if(!side)return;
+    const config=apiConfig();
+    if(!config.token){
+      renderVoiceRanking(side,[],voiceLibraryButton);
+      return;
+    }
+    try{
+      const response=await fetch(config.baseUrl+"/voice_library/list",{
+        headers:{Authorization:"Bearer "+config.token}
+      });
+      if(!response.ok)throw new Error(await apiError(response));
+      const data=await response.json();
+      const voices=Array.isArray(data)?data:(Array.isArray(data?.data)?data.data:[]);
+      renderVoiceRanking(side,voices,voiceLibraryButton);
+    }catch(error){
+      renderVoiceRanking(side,[],voiceLibraryButton);
+      const status=side.querySelector(":scope > .rank-status");
+      if(status){
+        status.textContent="样本库加载失败";
+        status.title=error&&error.message?error.message:"请稍后重试";
+      }
     }
   }
   async function generateSummary(button,article){
@@ -183,7 +269,7 @@
       '<div class="video-swap-actions"><button id="video-swap-submit" class="primary" type="button">开始换声</button><button id="video-swap-download" class="secondary" type="button" disabled>下载视频</button></div>',
       '<p id="video-swap-status" class="video-swap-status">上传后可先预览原视频</p>',
       '</div>',
-      '<div class="video-swap-preview"><h2>视频预览</h2><video id="video-swap-player" controls></video></div>'
+      '<div class="video-swap-preview"><h2>视频预览</h2><video id="video-swap-player" controls preload="metadata" playsinline></video></div>'
     ].join("");
     main.appendChild(page);
     const button=node("button","nav-btn","视频换声");
@@ -202,6 +288,22 @@
       if(objectUrl)URL.revokeObjectURL(objectUrl);
       objectUrl=URL.createObjectURL(file);
       player.src=objectUrl;
+      const previewUrl=objectUrl;
+      player.addEventListener("loadedmetadata",()=>{
+        if(player.src!==previewUrl)return;
+        if(Number.isFinite(player.duration)&&player.duration>0)player.currentTime=Math.min(.1,player.duration/2);
+      },{once:true});
+      player.addEventListener("loadeddata",()=>{
+        if(player.src!==previewUrl)return;
+        status.className="video-swap-status";
+        status.textContent="原视频已加载，可直接预览";
+      },{once:true});
+      player.addEventListener("error",()=>{
+        if(player.src!==previewUrl)return;
+        status.className="video-swap-status error";
+        status.textContent="浏览器无法解码该视频画面，请使用 H.264 编码的 MP4 视频";
+      },{once:true});
+      player.load();
       download.disabled=true;
       download.removeAttribute("data-url");
       status.className="video-swap-status";
@@ -282,6 +384,13 @@
       option.textContent="Katherine · 英文女声";
     });
   }
+  function updateSummaryTitle(){
+    document.querySelectorAll("button").forEach(button=>{
+      if(button.textContent.trim()!=="智能摘要")return;
+      const title=button.closest("article.panel")?.querySelector(".panel-title");
+      if(title)title.textContent="文本摘要";
+    });
+  }
   function updateOralStartLabel(){
     const oralPage=document.querySelectorAll("main > section.page")[6];
     if(!oralPage)return;
@@ -326,7 +435,7 @@
         return;
       }
       const article=button.closest("article.panel");
-      if(article&&article.querySelector(".panel-title")?.textContent.trim()==="文本朗读"&&button.textContent.trim()==="智能摘要"){
+      if(article&&article.querySelector(".panel-title")?.textContent.trim()==="文本摘要"&&button.textContent.trim()==="智能摘要"){
         event.preventDefault();
         event.stopImmediatePropagation();
         generateSummary(button,article);
@@ -354,6 +463,7 @@
       if(!token)sessionStorage.removeItem("video-layout-auth-refresh");
       authTokenAtLoad=token;
       updateBuiltInVoiceLabels();
+      updateSummaryTitle();
       updateOralStartLabel();
     },400);
   }
@@ -383,6 +493,7 @@
         },0);
       });
     });
+    originalButtons[0].addEventListener("click",()=>window.setTimeout(()=>loadVoiceRanking(originalButtons[1]),0));
     originalButtons[2].dataset.videoHidden="true";
     originalButtons[6].dataset.videoHidden="true";
     const homeButton=createHome(main,nav,originalButtons[0]);
@@ -390,7 +501,9 @@
     addOralSubnav(main,originalButtons[5],originalButtons[6]);
     bindEnhancements();
     updateBuiltInVoiceLabels();
+    updateSummaryTitle();
     updateOralStartLabel();
+    loadVoiceRanking(originalButtons[1]);
     showHome(homeButton);
     window.addEventListener("beforeunload",()=>{
       if(objectUrl)URL.revokeObjectURL(objectUrl);

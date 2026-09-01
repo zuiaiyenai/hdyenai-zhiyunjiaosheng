@@ -10,6 +10,9 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -27,6 +30,9 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
 
     @Value("${app.ffmpeg-path:ffmpeg}")
     private String ffmpegPath;
+
+    @Value("${app.ffprobe-path:ffprobe}")
+    private String ffprobePath;
 
     private final ASRService asrService;
     private final TTSService ttsService;
@@ -89,19 +95,72 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
     private String mergeAudioAndSubtitles(String videoPath, String newAudioPath, String subtitlePath) throws Exception {
         String outputVideoPath = outputDir + "/final_output.mp4";
         Files.createDirectories(Paths.get(outputDir));
-        net.bramp.ffmpeg.FFmpeg ffmpeg = new net.bramp.ffmpeg.FFmpeg(ffmpegPath);
-        net.bramp.ffmpeg.builder.FFmpegBuilder builder = new net.bramp.ffmpeg.builder.FFmpegBuilder()
-                .setInput(videoPath)
-                .addInput(newAudioPath)
-                .addExtraArgs("-vf", "subtitles=" + subtitlePath.replace("\\", "/").replace(":", "\\:"))
-                .overrideOutputFiles(true)
-                .addOutput(outputVideoPath)
-                .setAudioCodec("aac")
-                .setFormat("mp4")
-                .done();
-        ffmpeg.run(builder);
+        List<String> command = new ArrayList<>();
+        double videoDuration = probeDuration(videoPath);
+        double audioDuration = probeDuration(newAudioPath);
+        double audioTempo = audioDuration / videoDuration;
+        log.info("视频换声时长匹配：video={}s, audio={}s, tempo={}",
+                videoDuration, audioDuration, audioTempo);
+        command.add(ffmpegPath);
+        command.addAll(buildMergeCommand(
+                videoPath, newAudioPath, subtitlePath, outputVideoPath, audioTempo));
+
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        String ffmpegOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            log.error("视频合成失败，FFmpeg 输出：{}", ffmpegOutput);
+            String detail = ffmpegOutput.lines().filter(line -> !line.isBlank())
+                    .reduce((first, second) -> second).orElse("未知错误");
+            throw new java.io.IOException("视频合成失败: " + detail);
+        }
         log.info("最终视频合成完成: {}", outputVideoPath);
         return outputVideoPath;
+    }
+
+    List<String> buildMergeCommand(
+            String videoPath, String newAudioPath, String subtitlePath,
+            String outputVideoPath, double audioTempo) {
+        return List.of(
+                "-hide_banner", "-y",
+                "-i", videoPath,
+                "-i", newAudioPath,
+                "-vf", "subtitles=" + subtitlePath.replace("\\", "/").replace(":", "\\:"),
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-filter:a", buildAtempoFilter(audioTempo),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-shortest",
+                "-movflags", "+faststart",
+                outputVideoPath);
+    }
+
+    String buildAtempoFilter(double tempo) {
+        if (!Double.isFinite(tempo) || tempo <= 0) {
+            throw new IllegalArgumentException("音视频时长比例无效");
+        }
+        List<String> filters = new ArrayList<>();
+        while (tempo > 2.0) {
+            filters.add("atempo=2.000000");
+            tempo /= 2.0;
+        }
+        while (tempo < 0.5) {
+            filters.add("atempo=0.500000");
+            tempo /= 0.5;
+        }
+        filters.add(String.format(Locale.ROOT, "atempo=%.6f", tempo));
+        return String.join(",", filters);
+    }
+
+    private double probeDuration(String mediaPath) throws Exception {
+        double duration = new net.bramp.ffmpeg.FFprobe(ffprobePath)
+                .probe(mediaPath).getFormat().duration;
+        if (!Double.isFinite(duration) || duration <= 0) {
+            throw new IllegalArgumentException("无法读取媒体时长: " + mediaPath);
+        }
+        return duration;
     }
 
     private String saveTempAudio(byte[] audioData) throws Exception {

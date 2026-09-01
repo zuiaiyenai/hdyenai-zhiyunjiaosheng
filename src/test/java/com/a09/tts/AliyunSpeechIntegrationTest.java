@@ -5,12 +5,17 @@ import com.a09.tts.service.AliyunSpeechService;
 import com.a09.tts.service.DialectVoiceCatalog;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.ByteArrayOutputStream;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 class AliyunSpeechIntegrationTest {
@@ -57,5 +62,24 @@ class AliyunSpeechIntegrationTest {
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         assertThat(response.getHeaders().getContentType().toString()).isEqualTo("audio/mpeg");
         assertThat((byte[]) response.getBody()).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    void dialectControllerStreamsEnhancedNortheastSpeech() throws Exception {
+        AliyunSpeechService service = mock(AliyunSpeechService.class);
+        doAnswer(invocation -> {
+            invocation.<java.io.OutputStream>getArgument(2).write(new byte[]{1, 2, 3});
+            return null;
+        }).when(service).stream(eq("咱们唠嗑更顺溜"), eq("cuijie"), any());
+        DialectTTSController controller = new DialectTTSController(service);
+
+        ResponseEntity<?> response = controller.streamDialect(
+                Map.of("text", "我们聊天更顺畅", "voice", "cuijie"));
+        ByteArrayOutputStream audio = new ByteArrayOutputStream();
+        ((StreamingResponseBody) response.getBody()).writeTo(audio);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getHeaders().getContentType().toString()).isEqualTo("audio/mpeg");
+        assertThat(audio.toByteArray()).containsExactly(1, 2, 3);
     }
 }

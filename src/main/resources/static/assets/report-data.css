@@ -1,0 +1,29 @@
+.chart .report-empty {
+  align-self: center;
+  width: 100%;
+  margin: 0;
+  color: #607d8b;
+  text-align: center;
+}
+
+.chart i strong {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #173f5b;
+  font-size: 12px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.chart i small {
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.metrics b {
+  max-width: 70%;
+  text-align: right;
+}

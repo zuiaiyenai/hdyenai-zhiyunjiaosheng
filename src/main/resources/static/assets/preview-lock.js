@@ -41,6 +41,8 @@
     unlockTimer=window.setTimeout(finishPreview,120000);
   }
 
+  window.voicePreviewLock={finish:finishPreview};
+
   const nativePlay=window.HTMLMediaElement&&window.HTMLMediaElement.prototype.play;
   if(nativePlay){
     window.HTMLMediaElement.prototype.play=function(){

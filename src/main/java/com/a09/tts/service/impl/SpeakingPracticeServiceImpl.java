@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -103,20 +104,27 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
             String owner = normalizeUsername(username);
             SpeakingPracticeHistory history = historyByUser.computeIfAbsent(
                     owner, ignored -> new SpeakingPracticeHistory());
-            String userSpeech = "";
-            // 尝试调用ASR进行真实的语音识别
-            if (asrService != null) {
-                try {
-                    userSpeech = asrService.transcribe(audioFilePath, language);
-                    log.info("ASR 识别结果: {}", userSpeech);
-                } catch (Exception e) {
-                    log.warn("ASR 服务调用失败，使用回退评分: {}", e.getMessage());
-                }
+            if (asrService == null) {
+                log.error("ASR 服务未配置，无法进行口语评测");
+                return recognitionFailure(HttpStatus.SERVICE_UNAVAILABLE, "ASR_UNAVAILABLE",
+                        "语音识别服务未配置，请启动本地 FunASR 后重试");
             }
 
-            if (userSpeech == null || userSpeech.isEmpty() || userSpeech.startsWith("[ASR服务暂不可用]")) {
-                userSpeech = "[无法识别语音内容]";
+            String userSpeech;
+            try {
+                userSpeech = asrService.transcribe(audioFilePath, language);
+                log.info("ASR 识别结果: {}", userSpeech);
+            } catch (Exception e) {
+                log.error("ASR 服务调用失败，终止本次评测: {}", e.getMessage());
+                return recognitionFailure(HttpStatus.SERVICE_UNAVAILABLE, "ASR_UNAVAILABLE",
+                        "语音识别服务不可用，请确认本地 FunASR 已启动后重试");
             }
+
+            if (userSpeech == null || userSpeech.isBlank() || userSpeech.startsWith("[")) {
+                return recognitionFailure(HttpStatus.UNPROCESSABLE_ENTITY, "NO_SPEECH",
+                        "未识别到有效语音，请在安静环境中重新录音");
+            }
+            userSpeech = userSpeech.trim();
 
             // 基于文本对比的真实评分
             double accuracy = calculateAccuracy(referenceText, userSpeech);
@@ -167,7 +175,7 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
      */
     private double calculateAccuracy(String reference, String userText) {
         if (userText == null || userText.isEmpty() || userText.startsWith("[")) {
-            return 60.0 + Math.random() * 20; // ASR不可用时返回基础分
+            return 0;
         }
 
         String refClean = reference.replaceAll("[\\s\\p{P}]", "");
@@ -215,14 +223,23 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
      */
     private double calculateFluency(String userText, String language) {
         if (userText == null || userText.isEmpty() || userText.startsWith("[")) {
-            return 65.0 + Math.random() * 20;
+            return 0;
         }
         // 基于文本长度估算流利度
         int length = userText.length();
         if (length < 10) return 50.0;
         if (length < 30) return 65.0;
         if (length < 60) return 78.0;
-        return 85.0 + Math.random() * 10;
+        return 90.0;
+    }
+
+    private ResponseEntity<?> recognitionFailure(HttpStatus status, String code, String message) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", "recognition_failed");
+        body.put("code", code);
+        body.put("message", message);
+        body.put("user_speech", "[无法识别语音内容]");
+        return ResponseEntity.status(status).body(body);
     }
 
     /**

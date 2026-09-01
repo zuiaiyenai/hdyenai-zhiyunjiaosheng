@@ -48,28 +48,59 @@ if (-not $speechServiceOnline -and (Test-Path $gptSovitsPython) -and (Test-Path 
 
 $asrModelRoot = Join-Path $gptSovitsDir "tools\asr\models"
 $asrServer = Join-Path $projectDir "scripts\asr_server.py"
-$asrServiceOnline = $false
-try {
-    $asrResponse = Invoke-WebRequest `
-        -Uri "http://127.0.0.1:9977/health" `
-        -Method Get `
-        -TimeoutSec 2 `
-        -SkipHttpErrorCheck
-    $asrServiceOnline = $asrResponse.StatusCode -eq 200
-} catch {
-    $asrServiceOnline = $false
+$asrModelDirs = @(
+    "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    "speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
+)
+
+function Test-AsrService {
+    try {
+        $health = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:9977/health" `
+            -Method Get `
+            -TimeoutSec 2
+        return $health.status -eq "UP"
+    } catch {
+        return $false
+    }
 }
 
+$asrModelsReady = $true
+foreach ($modelDir in $asrModelDirs) {
+    if (-not (Test-Path (Join-Path $asrModelRoot "$modelDir\model.pt"))) {
+        $asrModelsReady = $false
+        Write-Warning "Missing FunASR model: $modelDir"
+    }
+}
+
+$asrServiceOnline = Test-AsrService
 if (-not $asrServiceOnline -and (Test-Path $gptSovitsPython) -and (Test-Path $asrServer)) {
-    $speechLogDir = Join-Path $projectDir "logs"
-    New-Item -ItemType Directory -Force -Path $speechLogDir | Out-Null
-    Start-Process -FilePath $gptSovitsPython `
-        -ArgumentList @($asrServer, "--model-root", $asrModelRoot, "--host", "127.0.0.1", "--port", "9977") `
-        -WorkingDirectory $gptSovitsDir `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $speechLogDir "asr.out.log") `
-        -RedirectStandardError (Join-Path $speechLogDir "asr.err.log")
-    Write-Host "Local FunASR is starting on http://127.0.0.1:9977"
+    if ($asrModelsReady) {
+        $speechLogDir = Join-Path $projectDir "logs"
+        New-Item -ItemType Directory -Force -Path $speechLogDir | Out-Null
+        $asrProcess = Start-Process -FilePath $gptSovitsPython `
+            -ArgumentList @($asrServer, "--model-root", $asrModelRoot, "--host", "127.0.0.1", "--port", "9977") `
+            -WorkingDirectory $gptSovitsDir `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $speechLogDir "asr.out.log") `
+            -RedirectStandardError (Join-Path $speechLogDir "asr.err.log") `
+            -PassThru
+        Write-Host "Waiting for local FunASR on http://127.0.0.1:9977 ..."
+        for ($attempt = 0; $attempt -lt 60 -and -not $asrProcess.HasExited; $attempt++) {
+            if (Test-AsrService) {
+                $asrServiceOnline = $true
+                break
+            }
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+if ($asrServiceOnline) {
+    Write-Host "Local FunASR is ready."
+} else {
+    Write-Warning "Local FunASR is unavailable. Speaking evaluation will return ASR_UNAVAILABLE instead of generating scores. Check logs/asr.err.log."
 }
 
 if ($Mode -eq "auto") {

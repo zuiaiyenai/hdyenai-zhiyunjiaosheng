@@ -42,6 +42,7 @@ app:
   video-dir: ./uploads/video
   output-dir: ./uploads/output
   ffmpeg-path: ffmpeg
+  ffprobe-path: ffprobe
   accessibility-dir: ./uploads/accessibility
   courseware-dir: ./uploads/courseware
 

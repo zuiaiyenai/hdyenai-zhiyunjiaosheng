@@ -13,18 +13,26 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
 public class PPTServiceImpl implements PPTService {
 
     private static final Logger log = LoggerFactory.getLogger(PPTServiceImpl.class);
+    private static final String RATE_LIMIT_MESSAGE = "当前使用人数较多，AI 服务暂时繁忙，请稍后重试。";
 
     @Value("${moonshot.api.key:}")
     private String apiKey;
 
     @Value("${moonshot.api.base-url:https://api.moonshot.cn/v1}")
     private String baseUrl;
+
+    @Value("${moonshot.api.rate-limit-max-attempts:3}")
+    private int rateLimitMaxAttempts = 3;
+
+    @Value("${moonshot.api.rate-limit-retry-delay-ms:1000}")
+    private long rateLimitRetryDelayMs = 1000;
 
     private final RestTemplate restTemplate;
     private final MoonshotChatClient moonshotChatClient;
@@ -83,14 +91,55 @@ public class PPTServiceImpl implements PPTService {
     }
 
     private String generateCoursewareContent(String fileContent) {
-        try {
-            log.info("调用 Moonshot 生成课件内容...");
-            return moonshotChatClient.generate(
-                    "你是 Kimi，由 Moonshot AI 提供的人工智能助手。请提供安全、准确、结构清晰的教学内容。",
-                    "请根据以下 PPT 内容生成上课的课件文本，要求结构清晰、重点突出：\n\n" + fileContent);
-        } catch (Exception e) {
-            log.error("Moonshot 课件生成失败: {}", e.getMessage());
-            return "课件生成失败，请检查 Moonshot API 配置。错误: " + e.getMessage();
+        int maxAttempts = Math.max(1, rateLimitMaxAttempts);
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                log.info("调用 Moonshot 生成课件内容...");
+                return moonshotChatClient.generate(
+                        "你是 Kimi，由 Moonshot AI 提供的人工智能助手。请提供安全、准确、结构清晰的教学内容。",
+                        "请根据以下 PPT 内容生成上课的课件文本，要求结构清晰、重点突出：\n\n" + fileContent);
+            } catch (Exception e) {
+                if (!isRateLimitError(e)) {
+                    log.error("Moonshot 课件生成失败: {}", e.getMessage());
+                    return "课件生成失败，请检查 Moonshot API 配置。";
+                }
+                if (attempt == maxAttempts) {
+                    log.warn("Moonshot 课件生成持续限流，已尝试 {} 次", attempt);
+                    return RATE_LIMIT_MESSAGE;
+                }
+                log.warn("Moonshot 课件生成被限流，第 {} 次重试将在 {} ms 后执行", attempt,
+                        rateLimitRetryDelayMs);
+                if (!waitBeforeRetry()) {
+                    return RATE_LIMIT_MESSAGE;
+                }
+            }
         }
+        return RATE_LIMIT_MESSAGE;
+    }
+
+    private boolean waitBeforeRetry() {
+        try {
+            Thread.sleep(Math.max(0, rateLimitRetryDelayMs));
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Moonshot 课件生成重试被中断");
+            return false;
+        }
+    }
+
+    private boolean isRateLimitError(Throwable error) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message == null) {
+                continue;
+            }
+            String normalized = message.toLowerCase(Locale.ROOT);
+            if (normalized.contains("429") || normalized.contains("rate limit")
+                    || normalized.contains("rate_limit")) {
+                return true;
+            }
+        }
+        return false;
     }
 }

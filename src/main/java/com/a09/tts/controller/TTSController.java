@@ -32,6 +32,7 @@ public class TTSController {
 
     @PostMapping(value = "/stream", produces = "audio/wav")
     public ResponseEntity<StreamingResponseBody> stream(@Valid @RequestBody TtsRequest request) {
+        ttsService.validate(request.text(), request.voice());
         StreamingResponseBody body = outputStream -> ttsService.stream(
                 request.text(), request.voice(), request.effectiveSpeed(),
                 request.effectivePitch(), request.effectiveRhythm(), outputStream);

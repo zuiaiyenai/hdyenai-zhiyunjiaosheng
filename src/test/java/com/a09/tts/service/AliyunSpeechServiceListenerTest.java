@@ -5,6 +5,7 @@ import com.alibaba.nls.client.protocol.tts.SpeechSynthesizerResponse;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -37,5 +38,21 @@ class AliyunSpeechServiceListenerTest {
         listener.onFail(response);
 
         assertThat(failure).hasValue("taskId=task-1，STATE_FAIL");
+    }
+
+    @Test
+    void writesAndFlushesEveryStreamingAudioChunk() {
+        ByteArrayOutputStream audio = new ByteArrayOutputStream();
+        AtomicReference<String> failure = new AtomicReference<>();
+        AtomicReference<IOException> writeFailure = new AtomicReference<>();
+        SpeechSynthesizerListener listener =
+                AliyunSpeechService.streamingListener(audio, failure, writeFailure);
+
+        listener.onMessage(ByteBuffer.wrap(new byte[]{1, 2}));
+        listener.onMessage(ByteBuffer.wrap(new byte[]{3}));
+
+        assertThat(audio.toByteArray()).containsExactly(1, 2, 3);
+        assertThat(failure).hasValue(null);
+        assertThat(writeFailure).hasValue(null);
     }
 }
