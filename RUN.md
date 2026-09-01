@@ -90,10 +90,27 @@ jwt.secret=至少32位的随机字符串
 
 | 功能 | 默认地址或配置 |
 |---|---|
-| TTS 语音合成 | `http://127.0.0.1:9966/tts` |
+| TTS 语音合成 | `http://127.0.0.1:9880/tts` |
 | ASR 语音识别 | `http://127.0.0.1:9977/asr` |
-| GPT-SoVITS 声音克隆 | `http://127.0.0.1:9880/tts` |
+| 阿里云方言合成 | `ALIYUN_NLS_APP_KEY`、`ALIYUN_AK_ID`、`ALIYUN_AK_SECRET` |
+| 阿里云声音复刻 | 上述三项；参考音频须为公网可访问的 HTTPS URL |
+| GPT-SoVITS 声音克隆 | `http://127.0.0.1:9880/tts`，启动脚本会自动检测并启动 |
 | Moonshot/Kimi | 在本地配置中填写 `moonshot.api.key` |
+
+### 阿里云 NLS Token 自动刷新
+
+NLS Token 只有约 36–48 小时有效期，不能配置为永久 Token。项目会使用 RAM
+AccessKey 调用 `CreateToken`，缓存结果并在过期前 5 分钟自动刷新：
+
+```powershell
+$env:ALIYUN_NLS_APP_KEY='你的 AppKey'
+$env:ALIYUN_AK_ID='RAM 用户 AccessKey ID'
+$env:ALIYUN_AK_SECRET='RAM 用户 AccessKey Secret'
+.\launch.ps1
+```
+
+配置 RAM AccessKey 后不需要再设置 `ALIYUN_NLS_TOKEN`。该变量仅用于没有
+AccessKey 时临时兼容手工 Token。不要把 AccessKey 写入仓库或提交到 Git。
 
 ## Redis（可选）
 

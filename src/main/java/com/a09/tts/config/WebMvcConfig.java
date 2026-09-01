@@ -20,6 +20,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/", "/index.html", "/login.html", "/favicon.ico", "/error",
                         "/user/login", "/user/register", "/api/user/**",
                         "/actuator/health", "/css/**", "/js/**", "/assets/**",
-                        "/images/**", "/static/**");
+                        "/images/**", "/static/**", "/ws/asr/stream");
     }
 }

@@ -1,5 +1,6 @@
 package com.a09.tts.service.impl;
 
+import com.a09.tts.service.MoonshotChatClient;
 import com.a09.tts.service.PPTService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,7 +13,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Map;
 
 @Service
 public class PPTServiceImpl implements PPTService {
@@ -26,9 +27,11 @@ public class PPTServiceImpl implements PPTService {
     private String baseUrl;
 
     private final RestTemplate restTemplate;
+    private final MoonshotChatClient moonshotChatClient;
 
-    public PPTServiceImpl(RestTemplate restTemplate) {
+    public PPTServiceImpl(RestTemplate restTemplate, MoonshotChatClient moonshotChatClient) {
         this.restTemplate = restTemplate;
+        this.moonshotChatClient = moonshotChatClient;
     }
 
     public String processPptAndGenerateContent(MultipartFile file) throws IOException {
@@ -80,47 +83,14 @@ public class PPTServiceImpl implements PPTService {
     }
 
     private String generateCoursewareContent(String fileContent) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(apiKey);
-
-        List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of(
-                "role", "system",
-                "content", "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。"
-        ));
-        messages.add(Map.of(
-                "role", "system",
-                "content", fileContent
-        ));
-        messages.add(Map.of(
-                "role", "user",
-                "content", "请根据 PPT 内容生成上课的课件文本内容，要求结构清晰，重点突出。"
-        ));
-
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", "moonshot-v1-32k");
-        requestBody.put("messages", messages);
-        requestBody.put("temperature", 0.3);
-
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
         try {
             log.info("调用 Moonshot 生成课件内容...");
-            ResponseEntity<Map> response = restTemplate.postForEntity(
-                    baseUrl + "/chat/completions", request, Map.class);
-
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) response.getBody().get("choices");
-            if (choices != null && !choices.isEmpty()) {
-                Map<String, Object> firstChoice = choices.get(0);
-                Map<String, Object> message = (Map<String, Object>) firstChoice.get("message");
-                if (message != null) {
-                    return (String) message.get("content");
-                }
-            }
+            return moonshotChatClient.generate(
+                    "你是 Kimi，由 Moonshot AI 提供的人工智能助手。请提供安全、准确、结构清晰的教学内容。",
+                    "请根据以下 PPT 内容生成上课的课件文本，要求结构清晰、重点突出：\n\n" + fileContent);
         } catch (Exception e) {
             log.error("Moonshot 课件生成失败: {}", e.getMessage());
             return "课件生成失败，请检查 Moonshot API 配置。错误: " + e.getMessage();
         }
-        return null;
     }
 }

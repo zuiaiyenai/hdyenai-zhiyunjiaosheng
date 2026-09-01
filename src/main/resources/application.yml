@@ -18,14 +18,15 @@ spring:
     password: "${DB_PASSWORD:root}"
   sql:
     init:
-      mode: always
-      schema-locations: classpath:schema.sql
-      data-locations: classpath:data.sql
-      continue-on-error: true
+      mode: never
   servlet:
     multipart:
       max-file-size: 50MB
       max-request-size: 50MB
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
 
 server:
   port: "${SERVER_PORT:8081}"
@@ -56,26 +57,32 @@ moonshot:
   api:
     key: "${MOONSHOT_API_KEY:}"
     base-url: "${MOONSHOT_API_BASE_URL:https://api.moonshot.cn/v1}"
-    model: "${MOONSHOT_API_MODEL:moonshot-v1-32k}"
+    model: "${MOONSHOT_API_MODEL:kimi-k2.6}"
 
 asr:
   api:
     url: "${ASR_API_URL:http://127.0.0.1:9977/asr}"
     token: "${ASR_API_TOKEN:}"
 
-cosyvoice:
-  api:
-    url: "${COSYVOICE_API_URL:}"
-    key: "${COSYVOICE_API_KEY:}"
-
 tts:
   api:
-    url: "${TTS_API_URL:http://127.0.0.1:9966/tts}"
+    url: "${TTS_API_URL:http://127.0.0.1:9880/tts}"
+  sample-library-path: "${TTS_SAMPLE_LIBRARY_PATH:D:/BaiduNetdiskDownload/GPT-SoVITS-v2-240821/Sound_sample_library}"
+  default-voice: "${TTS_DEFAULT_VOICE:样本}"
+  english-voice: "${TTS_ENGLISH_VOICE:Katherine_Maher_reference}"
   output-root: "${TTS_OUTPUT_ROOT:./uploads/output}"
 
 sound-clone:
   api:
     url: "${SOUND_CLONE_API_URL:http://127.0.0.1:9880/tts}"
+
+aliyun:
+  nls:
+    app-key: "${ALIYUN_NLS_APP_KEY:}"
+    token: "${ALIYUN_NLS_TOKEN:}"
+    websocket-url: "${ALIYUN_NLS_WEBSOCKET_URL:wss://nls-gateway-cn-beijing.aliyuncs.com/ws/v1}"
+    access-key-id: "${ALIYUN_AK_ID:}"
+    access-key-secret: "${ALIYUN_AK_SECRET:}"
 
 management:
   endpoints:

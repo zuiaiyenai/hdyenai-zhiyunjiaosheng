@@ -40,13 +40,10 @@ asr:
 tts:
   api:
     url: http://127.0.0.1:1/tts
+  sample-library-path: ./target/test-samples
+  default-voice: test-voice
   output-root: ./target/test-uploads/output
 
 sound-clone:
   api:
     url: http://127.0.0.1:1/tts
-
-cosyvoice:
-  api:
-    url: ""
-    key: ""

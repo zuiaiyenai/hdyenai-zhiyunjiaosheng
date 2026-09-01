@@ -1,0 +1,19 @@
+# Local configuration and credentials
+config/application-local.yml
+config/application-local.properties
+
+# Build output and runtime data
+target/
+logs/
+uploads/
+scripts/__pycache__/
+*.py[cod]
+
+# Local tools and IDE metadata
+.idea/
+*.iml
+.playwright-mcp/
+.firecrawl/
+
+# Local verification fixtures
+ppt-fixture-slide-01.png

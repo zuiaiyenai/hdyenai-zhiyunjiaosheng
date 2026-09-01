@@ -2,13 +2,20 @@ package com.a09.tts.service.impl;
 
 import com.a09.tts.service.ASRService;
 import com.a09.tts.service.AccessibilityService;
+import com.a09.tts.service.MoonshotChatClient;
+import org.apache.poi.hslf.usermodel.HSLFShape;
+import org.apache.poi.hslf.usermodel.HSLFSlide;
+import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.hslf.usermodel.HSLFTextShape;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFShape;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
@@ -30,16 +37,10 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     @Autowired(required = false)
     private ASRService asrService;
 
-    @Value("${moonshot.api.key:}")
-    private String moonshotApiKey;
+    private final MoonshotChatClient moonshotChatClient;
 
-    @Value("${moonshot.api.base-url:https://api.moonshot.cn/v1}")
-    private String moonshotBaseUrl;
-
-    private final RestTemplate restTemplate;
-
-    public AccessibilityServiceImpl(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+    public AccessibilityServiceImpl(MoonshotChatClient moonshotChatClient) {
+        this.moonshotChatClient = moonshotChatClient;
     }
 
     /**
@@ -141,11 +142,13 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     public Map<String, Object> generateStudySummary(String textContent) {
         Map<String, Object> result = new HashMap<>();
         String summary = null;
+        boolean aiGenerated = false;
 
         // 尝试调用 Moonshot API
-        if (moonshotApiKey != null && !moonshotApiKey.isEmpty()) {
+        if (moonshotChatClient.isConfigured()) {
             try {
                 summary = callMoonshotApi(textContent);
+                aiGenerated = true;
             } catch (Exception e) {
                 log.warn("Moonshot API调用失败，使用本地生成: {}", e.getMessage());
             }
@@ -158,7 +161,7 @@ public class AccessibilityServiceImpl implements AccessibilityService {
 
         result.put("summary", summary);
         result.put("generatedAt", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        result.put("source", summary != null && summary.contains("Moonshot") ? "ai" : "local");
+        result.put("source", aiGenerated ? "ai" : "local");
         return result;
     }
 
@@ -166,41 +169,12 @@ public class AccessibilityServiceImpl implements AccessibilityService {
      * 调用 Moonshot/Kimi API 生成摘要
      */
     private String callMoonshotApi(String textContent) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(moonshotApiKey);
-
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", "moonshot-v1-32k");
-        requestBody.put("temperature", 0.3);
-
-        List<Map<String, String>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "system", "content",
+        log.info("调用Moonshot API生成摘要...");
+        return moonshotChatClient.generate(
                 "你是一个专业的学习助手。请根据用户提供的学习文本内容，生成一份结构清晰的学习纪要。" +
-                "要求包含：1. 内容概要（核心观点总结）2. 关键知识点（分点列出）" +
-                "3. 重点难点分析 4. 学习建议。格式使用Markdown。"));
-        messages.add(Map.of("role", "user", "content",
-                "请为生成以下文本的学习纪要：\n\n" + textContent));
-        requestBody.put("messages", messages);
-
-        try {
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-            log.info("调用Moonshot API生成摘要...");
-            ResponseEntity<Map> response = restTemplate.postForEntity(
-                    moonshotBaseUrl + "/chat/completions", request, Map.class);
-
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) response.getBody().get("choices");
-            if (choices != null && !choices.isEmpty()) {
-                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
-                if (message != null && message.get("content") != null) {
-                    log.info("Moonshot API摘要生成成功");
-                    return (String) message.get("content");
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Kimi API请求失败: {}", e.getMessage());
-        }
-        return null;
+                        "要求包含：1. 内容概要（核心观点总结）2. 关键知识点（分点列出）" +
+                        "3. 重点难点分析 4. 学习建议。格式使用Markdown。",
+                "请为生成以下文本的学习纪要：\n\n" + textContent);
     }
 
     /**
@@ -251,12 +225,46 @@ public class AccessibilityServiceImpl implements AccessibilityService {
      */
     public Map<String, Object> readPPTFile(MultipartFile file) throws Exception {
         Map<String, Object> result = new HashMap<>();
-        String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        String fileName = file.getOriginalFilename();
+        String content;
+        if (fileName != null && fileName.toLowerCase(Locale.ROOT).endsWith(".ppt")) {
+            content = extractPptText(file);
+        } else {
+            content = extractPptxText(file);
+        }
         result.put("text", content);
-        result.put("fileName", file.getOriginalFilename());
+        result.put("fileName", fileName);
         result.put("fileSize", file.getSize());
-        result.put("message", "PPT文件已接收，正在解析内容...");
-        log.info("PPT文件朗读 - 文件名: {}", file.getOriginalFilename());
+        result.put("message", "PPT文件解析成功");
+        log.info("PPT文件朗读 - 文件名: {}, 提取字数: {}", fileName, content.length());
         return result;
+    }
+
+    private String extractPptxText(MultipartFile file) throws Exception {
+        StringJoiner content = new StringJoiner("\n");
+        try (XMLSlideShow slideShow = new XMLSlideShow(file.getInputStream())) {
+            for (XSLFSlide slide : slideShow.getSlides()) {
+                for (XSLFShape shape : slide.getShapes()) {
+                    if (shape instanceof XSLFTextShape textShape && !textShape.getText().isBlank()) {
+                        content.add(textShape.getText().trim());
+                    }
+                }
+            }
+        }
+        return content.toString();
+    }
+
+    private String extractPptText(MultipartFile file) throws Exception {
+        StringJoiner content = new StringJoiner("\n");
+        try (HSLFSlideShow slideShow = new HSLFSlideShow(file.getInputStream())) {
+            for (HSLFSlide slide : slideShow.getSlides()) {
+                for (HSLFShape shape : slide.getShapes()) {
+                    if (shape instanceof HSLFTextShape textShape && !textShape.getText().isBlank()) {
+                        content.add(textShape.getText().trim());
+                    }
+                }
+            }
+        }
+        return content.toString();
     }
 }

@@ -1,0 +1,54 @@
+:root{--video-blue:#168fe2;--video-deep:#315f82;--video-panel:rgba(110,153,190,.72)}
+.login-card .api-line{display:none}
+html{min-width:760px;height:100%}
+body{height:100%;overflow:hidden;background:linear-gradient(135deg,#daf8ff 0%,#8ee8e6 46%,#94b7da 100%);background-attachment:fixed;font-size:13px}
+#app{height:100%;display:flex;flex-direction:column;transform-origin:0 0}
+body:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(circle at 18% 16%,rgba(255,255,255,.75),transparent 26%),linear-gradient(110deg,rgba(255,255,255,.22),transparent 42%)}
+.topbar{position:relative;height:44px;padding:0 56px 0 64px;background:linear-gradient(90deg,rgba(202,246,250,.94),rgba(114,176,213,.94));box-shadow:0 3px 10px rgba(35,83,113,.24)}
+.brand{min-width:190px;gap:8px;color:#287b9e;font-size:18px;line-height:1}
+.brand:after{content:"AI语音教学与智能教育生态";display:block;position:absolute;margin:27px 0 0 39px;font-size:7px;font-weight:500;letter-spacing:.4px;color:#527f92}
+.brand-mark{width:30px;height:30px;border-radius:0;background:transparent;color:#2f9abb}
+.brand-mark svg{font-size:28px}.topbar nav{min-width:0;justify-content:space-evenly;overflow:visible}
+.nav-btn{min-width:62px;padding:0 10px;white-space:nowrap;color:#fff;font-size:12px;font-weight:700;text-shadow:0 1px 2px rgba(48,91,120,.25)}
+.nav-btn.active,.nav-btn:hover{background:rgba(255,255,255,.2)}.nav-btn.active:after{left:10px;right:10px;height:2px}
+.nav-btn[data-video-hidden=true]{display:none}.user{gap:6px;font-size:0;margin-left:12px}.user>span:not(.avatar){display:none}
+.avatar{width:32px;height:32px;background:#c8ad7c;border-color:rgba(255,255,255,.82);color:#fff}
+.video-user-menu{position:absolute;z-index:30;top:calc(100% + 8px);right:18px;min-width:150px;display:none;padding:12px;border:1px solid rgba(75,129,155,.22);border-radius:10px;background:#fff;box-shadow:0 12px 32px rgba(30,72,92,.18)}
+.video-user-menu.open{display:grid;gap:10px}.video-user-menu strong{color:#27566c;font-size:14px}.video-user-menu button{min-height:32px;border:1px solid #c9dfe9;border-radius:7px;background:#f5fbfe;color:#32677f;cursor:pointer}
+main{flex:1;width:100%;max-width:none;height:auto;min-height:0;margin:0;padding:12px 18px 18px;overflow:auto}.page{height:100%;min-height:0;animation:video-fade .2s ease-out}
+@keyframes video-fade{from{opacity:.3;transform:translateY(3px)}}
+.hero-grid{height:100%;grid-template-columns:140px minmax(0,1fr);gap:22px}
+.side{height:100%;min-height:0;padding:0 10px 10px;border-radius:7px;background:linear-gradient(#5b87a7,#2f6288);box-shadow:0 7px 18px rgba(43,89,120,.2)}
+.side h3{margin:0 -10px 3px;padding:8px 6px;border-radius:7px 7px 2px 2px;background:#365f7c;text-align:center;font-size:15px}
+.rank{justify-content:center;gap:4px;padding:12px 3px;border-bottom:0;font-size:12px}.rank b,.rank small{display:none}.more{padding-top:9px}
+.workspace,.panel,.video-custom-page,.video-home{border:1px solid rgba(255,255,255,.42);border-radius:7px;background:var(--video-panel);box-shadow:0 9px 24px rgba(44,89,119,.16)}
+.workspace{height:100%;min-height:0;padding:26px 28px 16px}.editor{height:150px;padding:12px;border-color:#5fa8ca;border-radius:2px;resize:vertical;font-size:12px;line-height:1.65}
+.editor-foot{margin:7px 0 32px}.settings{gap:54px}.box{min-height:225px;padding:15px 28px;background:linear-gradient(150deg,rgba(94,134,174,.72),rgba(190,218,225,.72));color:#223c50}
+.box h4{font-size:15px;font-weight:500}.box label{grid-template-columns:52px 1fr}.box select,.wide{padding:7px 9px;font-size:12px}
+.chip{padding:5px 12px;font-size:11px}.primary,.secondary{border-radius:1px;padding:8px 16px;background:linear-gradient(#34b5f0,#168fe2);box-shadow:0 2px 4px rgba(35,104,146,.15)}
+.secondary{background:linear-gradient(#87b2cc,#5f8bad)}.panel{overflow:hidden;background:rgba(116,154,190,.72)}
+.panel-title{padding:9px 15px;background:rgba(53,91,119,.82);font-size:15px;font-weight:500}.panel-body{padding:18px}
+.featured{justify-content:space-around}.voice-card{min-width:145px;padding:12px 16px;border:0;border-radius:5px;box-shadow:0 2px 7px rgba(39,79,105,.12)}
+.voice-list{max-height:260px;overflow:auto;border-radius:4px}.voice-row{grid-template-columns:130px 1fr 80px}.result{min-height:110px;font-size:12px}
+.drop{min-height:118px}.three{gap:16px}.two{gap:36px}.scenario{padding:14px}.conversation{min-height:250px;max-height:320px;overflow:auto}.chart{height:220px}
+.video-home{position:relative;width:100%;height:100%;min-height:0;overflow:hidden;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 74%,rgba(26,132,255,.6),transparent 33%),radial-gradient(ellipse at 24% 70%,rgba(24,220,255,.45),transparent 22%),radial-gradient(ellipse at 76% 70%,rgba(122,84,255,.45),transparent 22%),linear-gradient(#02070f,#06112a 64%,#021025);color:#fff;text-align:center}
+.video-home:before{content:"∞";position:absolute;left:50%;top:52%;transform:translate(-50%,-50%) scaleX(1.55);font-family:Arial Black,sans-serif;font-size:clamp(270px,44vw,500px);line-height:.65;color:transparent;-webkit-text-stroke:8px rgba(40,177,255,.8);text-shadow:0 0 10px #30e7ff,0 0 28px #1477ff,0 0 60px #4d2eff;opacity:.9}
+.video-home__content{position:relative;z-index:1;align-self:start;padding-top:54px}.video-home h1{margin:0;font-size:clamp(32px,5vw,53px);letter-spacing:3px;background:linear-gradient(90deg,#e5fbff,#7effd4,#ff83db,#dffcff);-webkit-background-clip:text;color:transparent;text-shadow:0 5px 18px rgba(71,203,255,.16)}
+.video-home p{margin:8px 0 20px;font-weight:700}.video-home button{padding:9px 26px}
+.video-custom-page{width:100%;height:100%;min-height:0;padding:18px 24px;display:grid;grid-template-columns:36% 1fr;gap:26px}
+.video-swap-controls,.video-swap-preview{min-width:0}.video-swap-controls{padding:18px 22px;background:rgba(255,255,255,.18);border-radius:6px}
+.video-swap-controls h2,.video-swap-preview h2{margin:0 0 18px;text-align:center;font-size:17px}
+.video-file-drop{min-height:120px;display:grid;place-items:center;padding:18px;background:rgba(255,255,255,.92);border:2px dashed rgba(68,135,172,.4);color:#668295;text-align:center}
+.video-file-drop input{display:block;max-width:100%;margin-top:12px}.video-voice-field{display:block;margin-top:28px;font-weight:700}
+.video-voice-field select{width:100%;margin-top:10px;padding:9px;border:1px solid #8eb9cf;background:#fff}.video-swap-actions{display:flex;gap:10px;justify-content:center;margin-top:22px}
+.video-swap-preview{display:flex;flex-direction:column;padding:18px;background:rgba(255,255,255,.16);border-radius:6px}.video-swap-preview h2{padding:10px;background:rgba(48,86,112,.83);color:#fff}
+.video-swap-preview video{width:100%;min-height:310px;max-height:56vh;background:#111}.video-swap-status{min-height:18px;margin:10px 0 0;text-align:center;color:#244a62}.video-swap-status.error{color:#9c3030}
+.page:has(>.video-subnav){position:relative;min-height:480px;padding-left:164px}
+.video-subnav{position:absolute;left:0;top:90px;width:144px;min-height:318px;display:flex;flex-direction:column;gap:42px;justify-content:flex-start;padding:46px 18px;background:linear-gradient(rgba(255,255,255,.78),rgba(114,159,194,.55));border-radius:6px;box-shadow:0 4px 15px rgba(41,83,111,.12)}
+.video-subnav button{min-width:108px}
+@media(max-width:1000px){.topbar{padding:0 28px}.brand{min-width:175px}.nav-btn{min-width:58px;padding:0 7px;font-size:11px}.hero-grid{grid-template-columns:140px minmax(0,1fr);gap:22px}.settings{grid-template-columns:1fr 1fr;gap:54px}.three{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:1fr 1fr}.brand span:last-child{display:inline}.user .avatar{display:grid}}
+@media(max-width:800px){html{min-width:0;height:auto}body{height:auto;min-height:100vh;overflow:auto}#app{height:auto;min-height:100vh}.topbar{height:auto;min-height:52px;padding:5px 12px;flex-wrap:wrap}.brand{min-width:150px}.brand:after{display:none}.topbar nav{order:3;flex-basis:100%;overflow-x:auto}.nav-btn{height:42px}main{height:auto;min-height:calc(100vh - 94px);padding:10px;overflow:visible}.page{height:auto;min-height:0}.hero-grid,.settings,.three,.two,.video-custom-page{grid-template-columns:1fr}.side,.workspace{height:auto;min-height:auto}.settings{gap:14px}.video-home{height:auto;min-height:600px}}
+.microphone-control{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:8px 0 12px;padding:8px;border:1px solid rgba(55,116,150,.24);border-radius:5px;background:rgba(255,255,255,.38)}
+.microphone-control button{min-width:auto;padding:6px 10px;font-size:12px}
+.microphone-control button:disabled{cursor:not-allowed;opacity:.55}
+.microphone-status{flex:1;min-width:150px;color:#244a62;font-size:12px}
