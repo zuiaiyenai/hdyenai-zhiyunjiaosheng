@@ -163,3 +163,60 @@ mvn -o package
 ```
 
 首次下载依赖时去掉 `-o`。
+
+## Docker Compose
+
+要求 Docker Engine 与 Docker Compose v2。先创建本地环境文件：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+将 `.env` 中的数据库、Redis 和 JWT 占位值替换为本地随机值，然后执行：
+
+```powershell
+docker compose config
+docker compose up --build -d
+docker compose ps
+```
+
+Compose 会启动 MySQL、Redis 和后端，三者都有 healthcheck，数据库、Redis 和上传目录使用持久卷。停止服务：
+
+```powershell
+docker compose down
+```
+
+只有明确需要删除本地容器数据时才使用 `docker compose down -v`。
+
+## Python ASR
+
+推荐 Python 3.12。创建干净环境并安装仓库中实际使用的依赖：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pytest -q scripts/test_asr_server.py
+```
+
+启动服务需要提前准备 FunASR 模型目录：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\asr_server.py --model-root D:\models\funasr
+```
+
+`--model-root` 下必须包含代码中列出的 ASR、VAD 和标点模型。依赖安装和单元测试不下载模型；服务加载测试需要模型文件，缺少时应标记为外部前置条件未满足。
+
+## 前端工程状态
+
+`src/main/resources/static` 中是已构建 bundle，不是完整前端源码。仓库没有 `package.json`、锁文件、Vite/Vue 配置和组件源码，因此没有可执行的 `npm ci` / `npm run build`。当前阶段不会修改或反编译压缩 bundle。正式发布前必须恢复原始前端源码和锁文件，并把前端构建接入 CI。
+
+## CI
+
+`.github/workflows/ci.yml` 分别验证：
+
+- Java 全量测试与打包；
+- Python 依赖安装与 pytest；
+- Docker Compose 配置解析与后端镜像构建。
+
+由于前端源码缺失，CI 不伪造前端构建。

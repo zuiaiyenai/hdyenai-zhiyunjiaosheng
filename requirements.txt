@@ -1,0 +1,5 @@
+fastapi==0.141.1
+funasr==1.4.13
+python-multipart==0.0.32
+pytest==9.1.1
+uvicorn==0.52.4
