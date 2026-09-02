@@ -1,5 +1,8 @@
 package com.a09.tts.service;
 
+import com.a09.tts.repository.CoursewareProjectRepository.ProjectData;
+import com.a09.tts.repository.InMemoryCoursewareProjectRepository;
+import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
 import org.junit.jupiter.api.Test;
@@ -9,7 +12,10 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.time.Instant;
 import java.nio.file.Path;
 import java.util.zip.ZipFile;
 
@@ -51,7 +57,18 @@ class CoursewareProjectServiceTest {
         ProjectView created = service.create(ppt, "alice");
         assertEquals("人工智能导论", created.title());
         assertEquals(0, created.revision());
+        assertEquals("SUCCEEDED", created.status());
         assertThrows(IllegalArgumentException.class, () -> service.get(created.id(), "bob"));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.optimize(created.id(), "bob", "越权修改"));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateScript(created.id(), "bob", "越权讲稿"));
+        MockMultipartFile avatar = new MockMultipartFile(
+                "avatar", "avatar.png", "image/png", png());
+        assertThrows(IllegalArgumentException.class,
+                () -> service.uploadAvatar(created.id(), "bob", avatar));
+        assertThrows(IllegalArgumentException.class,
+                () -> service.download(created.id(), "bob", "package"));
 
         ProjectView optimized = service.optimize(created.id(), "alice", "增加课堂提问");
         assertEquals(1, optimized.revision());
@@ -90,12 +107,70 @@ class CoursewareProjectServiceTest {
         assertTrue(exception.getMessage().contains("AI 服务暂时繁忙"));
     }
 
+    @Test
+    void reloadsProjectAndRevisionsFromRepositoryAfterServiceRestart() throws Exception {
+        PPTService pptService = mock(PPTService.class);
+        when(pptService.processPptAndGenerateContent(any())).thenReturn("第一版讲稿");
+        InMemoryCoursewareProjectRepository repository = new InMemoryCoursewareProjectRepository();
+        CoursewareProjectService first = service(pptService, repository);
+        MockMultipartFile ppt = new MockMultipartFile("file", "重启恢复.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                pptx());
+
+        ProjectView created = first.create(ppt, "alice");
+        first.updateScript(created.id(), "alice", "重启后的第二版讲稿");
+
+        CoursewareProjectService restarted = service(pptService, repository);
+        ProjectView restored = restarted.get(created.id(), "alice");
+
+        assertEquals(1, restored.revision());
+        assertEquals("重启后的第二版讲稿", restored.script());
+        assertEquals("SUCCEEDED", restored.status());
+        ProjectData stored = repository.findByIdAndOwner(created.id(), "alice").orElseThrow();
+        assertTrue(!Path.of(stored.sourcePath()).isAbsolute());
+        assertTrue(!Path.of(stored.outputPath()).isAbsolute());
+        DownloadArtifact artifact = restarted.download(created.id(), "alice", "package");
+        try (ZipFile zip = new ZipFile(artifact.path().toFile())) {
+            assertNotNull(zip.getEntry("讲稿/历史版本-00.txt"));
+            assertNotNull(zip.getEntry("讲稿/历史版本-01.txt"));
+        }
+    }
+
+    @Test
+    void rejectsPersistedPathTraversalDuringReload() {
+        InMemoryCoursewareProjectRepository repository = new InMemoryCoursewareProjectRepository();
+        Instant now = Instant.now();
+        repository.save(new ProjectData(
+                "unsafe", "alice", "非法项目", "SUCCEEDED",
+                "../../outside.pptx", "alice/unsafe", "outside.pptx", "讲稿", 0,
+                "longxiao", 1.0, 1.0, 1.0, null, null, null, null, now, now));
+        CoursewareProjectService service = service(mock(PPTService.class), repository);
+
+        assertThrows(IllegalArgumentException.class, () -> service.get("unsafe", "alice"));
+    }
+
+    private CoursewareProjectService service(PPTService pptService,
+                                             InMemoryCoursewareProjectRepository repository) {
+        CoursewareProjectService service = new CoursewareProjectService(
+                pptService, mock(TTSService.class), new UploadSecurityService(), repository);
+        ReflectionTestUtils.setField(service, "coursewareDir", tempDirectory.toString());
+        ReflectionTestUtils.setField(service, "ffmpegPath", "ffmpeg");
+        ReflectionTestUtils.setField(service, "ffprobePath", "ffprobe");
+        return service;
+    }
+
     private byte[] pptx() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (XMLSlideShow show = new XMLSlideShow()) {
             show.createSlide();
             show.write(output);
         }
+        return output.toByteArray();
+    }
+
+    private byte[] png() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(new BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB), "png", output);
         return output.toByteArray();
     }
 }
