@@ -220,3 +220,17 @@ py -3.12 -m venv .venv
 - Docker Compose 配置解析与后端镜像构建。
 
 由于前端源码缺失，CI 不伪造前端构建。
+
+## 基础负载冒烟测试
+
+`scripts/load_smoke.py` 仅使用 Python 标准库，用于在可控环境中重现轻量 HTTP 负载测试。非健康检查场景需通过环境变量提供专用测试账号：
+
+```powershell
+$env:LOAD_TEST_USERNAME='load-test-user'
+$env:LOAD_TEST_PASSWORD='replace-with-local-test-password'
+python scripts\load_smoke.py --base-url http://127.0.0.1:8081 --scenario login --requests 50 --concurrency 5
+python scripts\load_smoke.py --base-url http://127.0.0.1:8081 --scenario voices --requests 200 --concurrency 20
+python scripts\load_smoke.py --base-url http://127.0.0.1:8081 --scenario task --task-id <task-id> --requests 200 --concurrency 20
+```
+
+输出包含状态码分布、成功率、吞吐量以及 p50/p95/p99 延迟。这是本机短时冒烟数据，不能替代持续压测或用于外推生产容量。

@@ -2,4 +2,6 @@ fastapi==0.141.1
 funasr==1.4.13
 python-multipart==0.0.32
 pytest==9.1.1
+torch==2.11.0
+torchaudio==2.11.0
 uvicorn==0.52.4
