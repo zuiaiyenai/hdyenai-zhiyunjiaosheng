@@ -6,13 +6,11 @@ import com.a09.tts.service.SpeakingPracticeService;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.security.UploadSecurityService.Type;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import jakarta.servlet.http.HttpServletRequest;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
@@ -36,14 +34,8 @@ public class SpeakingPracticeController {
     }
 
     @GetMapping("/example")
-    public ResponseEntity<?> getSpeakingExample() {
-        try {
-            return speakingPracticeService.getExampleTextAndAudio();
-        } catch (Exception e) {
-            log.error("获取示范文本失败", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("获取示范文本失败：" + e.getMessage());
-        }
+    public ResponseEntity<?> getSpeakingExample() throws Exception {
+        return speakingPracticeService.getExampleTextAndAudio();
     }
 
     @PostMapping("/evaluate")
@@ -54,89 +46,53 @@ public class SpeakingPracticeController {
             @RequestParam(value = "sessionId", required = false) String sessionId,
             @RequestParam(value = "language", defaultValue = "zh") String language,
             HttpServletRequest request
-    ) {
+    ) throws Exception {
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("音频文件为空！");
+        }
+        log.info("评测请求 - 语言: {} | 模式: {} | 会话: {}", language, mode, sessionId);
+        Path audioFilePath = uploadSecurity.save(file, Paths.get(speakingDir), Type.AUDIO,
+                currentUsername(request));
         try {
-            if (file.isEmpty()) {
-                return ResponseEntity.badRequest().body("音频文件为空！");
-            }
-            log.info("评测请求 - 语言: {} | 模式: {} | 会话: {}", language, mode, sessionId);
-            Path audioFilePath = uploadSecurity.save(file, Paths.get(speakingDir), Type.AUDIO,
-                    currentUsername(request));
-            try {
-                return speakingPracticeService.evaluate(
-                        audioFilePath.toString(), text, mode, sessionId, language, currentUsername(request));
-            } finally {
-                uploadSecurity.delete(Paths.get(speakingDir), audioFilePath);
-            }
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        } catch (Exception e) {
-            log.error("口语评测失败", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("口语评测失败：" + e.getMessage());
+            return speakingPracticeService.evaluate(
+                    audioFilePath.toString(), text, mode, sessionId, language, currentUsername(request));
+        } finally {
+            uploadSecurity.delete(Paths.get(speakingDir), audioFilePath);
         }
     }
 
     @GetMapping("/history")
     public ResponseEntity<?> getHistory(
             @RequestParam(value = "sessionId", required = false) String sessionId,
-            HttpServletRequest request) {
-        try {
-            return speakingPracticeService.getHistory(sessionId, currentUsername(request));
-        } catch (Exception e) {
-            log.error("获取历史记录失败", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("获取历史记录失败：" + e.getMessage());
-        }
+            HttpServletRequest request) throws Exception {
+        return speakingPracticeService.getHistory(sessionId, currentUsername(request));
     }
 
     @GetMapping("/dialogue/scenarios")
-    public ResponseEntity<?> getDialogueScenarios() {
-        try {
-            return speakingPracticeService.getDialogueScenarios();
-        } catch (Exception e) {
-            log.error("获取对话场景失败", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("获取对话场景失败：" + e.getMessage());
-        }
+    public ResponseEntity<?> getDialogueScenarios() throws Exception {
+        return speakingPracticeService.getDialogueScenarios();
     }
 
     @PostMapping("/dialogue/start")
     public ResponseEntity<?> startDialogue(
             @RequestBody Map<String, String> request,
-            HttpServletRequest httpRequest) {
-        try {
-            String scenarioId = request.get("scenarioId");
-            if (scenarioId == null) {
-                return ResponseEntity.badRequest().body("场景ID不能为空");
-            }
-            return speakingPracticeService.startDialogue(scenarioId, currentUsername(httpRequest));
-        } catch (SecurityException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
-        } catch (Exception e) {
-            log.error("开始对话失败", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("开始对话失败：" + e.getMessage());
+            HttpServletRequest httpRequest) throws Exception {
+        String scenarioId = request.get("scenarioId");
+        if (scenarioId == null || scenarioId.isBlank()) {
+            throw new IllegalArgumentException("场景ID不能为空");
         }
+        return speakingPracticeService.startDialogue(scenarioId, currentUsername(httpRequest));
     }
 
     @PostMapping("/dialogue/continue")
     public ResponseEntity<?> continueDialogue(
             @RequestBody Map<String, Object> request,
-            HttpServletRequest httpRequest) {
-        try {
-            String sessionId = (String) request.get("sessionId");
-            if (sessionId == null || sessionId.isBlank()) {
-                return ResponseEntity.badRequest().body("sessionId不能为空");
-            }
-            return speakingPracticeService.continueDialogue(sessionId, currentUsername(httpRequest));
-        } catch (SecurityException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(e.getMessage());
-        } catch (Exception e) {
-            log.error("继续对话失败", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("继续对话失败：" + e.getMessage());
+            HttpServletRequest httpRequest) throws Exception {
+        String sessionId = (String) request.get("sessionId");
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId不能为空");
         }
+        return speakingPracticeService.continueDialogue(sessionId, currentUsername(httpRequest));
     }
 
     private String currentUsername(HttpServletRequest request) {

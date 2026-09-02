@@ -41,18 +41,13 @@ public class VideoVoiceSwapController {
             @RequestParam(value = "transcript", required = false) String transcript,
             @RequestParam(value = "subtitles", required = false) String subtitles,
             @RequestParam(value = "includeSubtitles", defaultValue = "true") boolean includeSubtitles,
-            HttpServletRequest request) {
+            HttpServletRequest request) throws Exception {
 
         Path videoFilePath = null;
         try {
             videoFilePath = uploadSecurity.save(videoFile, Paths.get(videoDir), Type.VIDEO, username(request));
             return videoVoiceSwapService.processVideo(videoFilePath.toString(), voiceType,
                     1.0, 1.0, 1.0, transcript, subtitles, includeSubtitles);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        } catch (Exception e) {
-            log.error("处理失败", e);
-            return ResponseEntity.status(500).body("错误: " + e.getMessage());
         } finally {
             deleteUpload(videoFilePath);
         }
@@ -60,17 +55,12 @@ public class VideoVoiceSwapController {
 
     @PostMapping("/subtitles")
     public ResponseEntity<?> generateSubtitles(@RequestParam("video") MultipartFile videoFile,
-                                               HttpServletRequest request) {
+                                               HttpServletRequest request) throws Exception {
         Path videoFilePath = null;
         try {
             videoFilePath = uploadSecurity.save(videoFile, Paths.get(videoDir), Type.VIDEO, username(request));
             VideoSubtitlePreview preview = videoVoiceSwapService.generateSubtitlePreview(videoFilePath.toString());
             return ResponseEntity.ok(preview);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        } catch (Exception e) {
-            log.error("字幕生成失败", e);
-            return ResponseEntity.status(500).body("错误: " + e.getMessage());
         } finally {
             deleteUpload(videoFilePath);
         }
@@ -88,7 +78,7 @@ public class VideoVoiceSwapController {
         try {
             uploadSecurity.delete(Paths.get(videoDir), path);
         } catch (Exception e) {
-            log.warn("临时上传文件清理失败: {}", path, e);
+            log.warn("临时上传文件清理失败: {}", path.getFileName(), e);
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.a09.tts.controller;
 
 import com.a09.tts.mapper.VoiceMapper;
+import com.a09.tts.cleanup.PendingFileCleanupService;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.service.VoiceService;
 import com.a09.tts.service.impl.VoiceServiceImpl;
@@ -13,6 +14,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -110,12 +114,73 @@ class VoiceLibrarySecurityTest {
         when(mapper.findVoiceById(10)).thenReturn(voice);
         when(mapper.deleteVoiceById(10)).thenReturn(1);
         VoiceServiceImpl service = new VoiceServiceImpl();
+        PendingFileCleanupService cleanup = mock(PendingFileCleanupService.class);
         ReflectionTestUtils.setField(service, "voiceMapper", mapper);
         ReflectionTestUtils.setField(service, "uploadDir", nestedRoot.toString());
+        ReflectionTestUtils.setField(service, "pendingFileCleanupService", cleanup);
 
         assertEquals(1, service.deleteVoiceById(10));
         assertTrue(Files.exists(outside));
         verify(mapper).deleteVoiceById(10);
+        verify(cleanup).deleteOrEnqueue(PendingFileCleanupService.VOICE_STORAGE, outside.toString());
+    }
+
+    @Test
+    void databaseDeleteRunsFileCleanupOnlyAfterDatabaseDeleteSucceeds() {
+        Voice voice = privateVoice(11, "alice", "alice/voice.wav");
+        VoiceMapper mapper = mock(VoiceMapper.class);
+        PendingFileCleanupService cleanup = mock(PendingFileCleanupService.class);
+        when(mapper.findVoiceById(11)).thenReturn(voice);
+        when(mapper.deleteVoiceById(11)).thenReturn(1);
+        VoiceServiceImpl service = new VoiceServiceImpl();
+        ReflectionTestUtils.setField(service, "voiceMapper", mapper);
+        ReflectionTestUtils.setField(service, "pendingFileCleanupService", cleanup);
+
+        assertEquals(1, service.deleteVoiceById(11));
+        var order = inOrder(mapper, cleanup);
+        order.verify(mapper).deleteVoiceById(11);
+        order.verify(cleanup).deleteOrEnqueue(
+                PendingFileCleanupService.VOICE_STORAGE, "alice/voice.wav");
+
+        VoiceMapper failingMapper = mock(VoiceMapper.class);
+        when(failingMapper.findVoiceById(11)).thenReturn(voice);
+        when(failingMapper.deleteVoiceById(11)).thenThrow(new IllegalStateException("db unavailable"));
+        VoiceServiceImpl failingService = new VoiceServiceImpl();
+        ReflectionTestUtils.setField(failingService, "voiceMapper", failingMapper);
+        ReflectionTestUtils.setField(failingService, "pendingFileCleanupService", cleanup);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> failingService.deleteVoiceById(11));
+        verify(cleanup, org.mockito.Mockito.times(1)).deleteOrEnqueue(
+                PendingFileCleanupService.VOICE_STORAGE, "alice/voice.wav");
+    }
+
+    @Test
+    void databaseDeleteDefersFileCleanupUntilTransactionCommit() {
+        Voice voice = privateVoice(12, "alice", "alice/transaction.wav");
+        VoiceMapper mapper = mock(VoiceMapper.class);
+        PendingFileCleanupService cleanup = mock(PendingFileCleanupService.class);
+        when(mapper.findVoiceById(12)).thenReturn(voice);
+        when(mapper.deleteVoiceById(12)).thenReturn(1);
+        VoiceServiceImpl service = new VoiceServiceImpl();
+        ReflectionTestUtils.setField(service, "voiceMapper", mapper);
+        ReflectionTestUtils.setField(service, "pendingFileCleanupService", cleanup);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertEquals(1, service.deleteVoiceById(12));
+            verify(cleanup, never()).deleteOrEnqueue(
+                    PendingFileCleanupService.VOICE_STORAGE, "alice/transaction.wav");
+
+            for (TransactionSynchronization synchronization
+                    : TransactionSynchronizationManager.getSynchronizations()) {
+                synchronization.afterCommit();
+            }
+            verify(cleanup).deleteOrEnqueue(
+                    PendingFileCleanupService.VOICE_STORAGE, "alice/transaction.wav");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     private Voice privateVoice(int id, String owner, String filePath) {

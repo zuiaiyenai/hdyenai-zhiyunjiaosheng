@@ -1,5 +1,7 @@
 package com.a09.tts.task;
 
+import com.a09.tts.api.PageResult;
+import com.a09.tts.api.ResourceNotFoundException;
 import com.a09.tts.task.AsyncTaskService.TaskCapacityException;
 import com.a09.tts.task.AsyncTaskService.TaskSubmission;
 import org.junit.jupiter.api.Test;
@@ -23,9 +25,9 @@ class AsyncTaskServiceTest {
             TaskSubmission success = service.submit("alice", "TEST", null, () -> "done");
             assertEquals(TaskStatus.SUCCESS, awaitTerminal(service, success.taskId(), "alice").status());
             assertEquals("done", service.get(success.taskId(), "alice").resultData());
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(ResourceNotFoundException.class,
                     () -> service.get(success.taskId(), "bob"));
-            assertThrows(IllegalArgumentException.class,
+            assertThrows(ResourceNotFoundException.class,
                     () -> service.cancel(success.taskId(), "bob"));
 
             TaskSubmission failed = service.submit("alice", "TEST", null,
@@ -133,6 +135,34 @@ class AsyncTaskServiceTest {
         } finally {
             service.shutdown();
         }
+    }
+
+    @Test
+    void paginatesTasksWithinOwnerBoundary() {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        Instant now = Instant.now();
+        repository.save(task("alice-1", "alice", now.minusSeconds(2)));
+        repository.save(task("bob-1", "bob", now.minusSeconds(1)));
+        repository.save(task("alice-2", "alice", now));
+        AsyncTaskService service = service(
+                repository, 1, 1, 1, Duration.ofSeconds(1), 1);
+        try {
+            PageResult<TaskRecord> first = service.list("alice", 0, 1);
+            PageResult<TaskRecord> second = service.list("alice", 1, 1);
+            assertEquals(1, first.content().size());
+            assertTrue(first.hasNext());
+            assertEquals(1, second.content().size());
+            assertTrue(!second.hasNext());
+            assertTrue(first.content().stream().noneMatch(task -> task.owner().equals("bob")));
+            assertThrows(IllegalArgumentException.class, () -> service.list("alice", 0, 101));
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    private TaskRecord task(String id, String owner, Instant createdAt) {
+        return new TaskRecord(id, owner, "TEST", TaskStatus.SUCCESS,
+                100, "done", null, null, createdAt, createdAt, createdAt);
     }
 
     private AsyncTaskService service(InMemoryTaskRepository repository,

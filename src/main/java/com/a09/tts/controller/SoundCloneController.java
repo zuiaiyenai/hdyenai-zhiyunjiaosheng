@@ -1,5 +1,6 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.ServiceUnavailableException;
 import com.a09.tts.service.SoundCloneService;
 import com.a09.tts.service.AliyunSpeechService;
 import com.a09.tts.security.UploadSecurityService;
@@ -74,8 +75,7 @@ public class SoundCloneController {
             return ResponseEntity.ok(Map.of("provider", "aliyun-nls-2.0", "voiceName", voiceName));
         } catch (Exception exception) {
             log.error("阿里云声音复刻失败", exception);
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(Map.of("msg", exception.getMessage()));
+            throw new ServiceUnavailableException("阿里云声音复刻失败", exception);
         }
     }
 
@@ -95,8 +95,7 @@ public class SoundCloneController {
             return new ResponseEntity<>(audio, headers, HttpStatus.OK);
         } catch (Exception exception) {
             log.error("阿里云复刻音色合成失败，voiceName={}", voiceName, exception);
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(Map.of("msg", exception.getMessage()));
+            throw new ServiceUnavailableException("阿里云复刻音色合成失败", exception);
         }
     }
 
@@ -164,7 +163,7 @@ public class SoundCloneController {
         try {
             uploadSecurity.delete(Paths.get(uploadDir), path);
         } catch (Exception exception) {
-            log.warn("无法删除声音克隆临时文件：{}", path, exception);
+            log.warn("无法删除声音克隆临时文件：{}", path.getFileName(), exception);
         }
     }
 

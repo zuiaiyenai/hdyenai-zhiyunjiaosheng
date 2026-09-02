@@ -60,6 +60,15 @@ public class JdbcCoursewareProjectRepository implements CoursewareProjectReposit
     }
 
     @Override
+    public List<ProjectData> findByOwner(String owner, int offset, int limit) {
+        return jdbcTemplate.query(
+                "SELECT " + PROJECT_COLUMNS + " FROM courseware_project "
+                        + "WHERE owner_username = ? "
+                        + "ORDER BY updated_at DESC, project_id DESC LIMIT ? OFFSET ?",
+                this::mapProject, owner, limit, offset);
+    }
+
+    @Override
     public void saveRevision(RevisionData revision) {
         jdbcTemplate.update("""
                 INSERT INTO courseware_project_revision (

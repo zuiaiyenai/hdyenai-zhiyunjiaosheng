@@ -1,5 +1,8 @@
 package com.a09.tts.service;
 
+import com.a09.tts.api.PageResult;
+import com.a09.tts.api.Pagination;
+import com.a09.tts.api.ResourceNotFoundException;
 import com.a09.tts.media.ExternalProcessRunner;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.security.UploadSecurityService.Type;
@@ -12,6 +15,8 @@ import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -45,6 +50,7 @@ import java.util.zip.ZipOutputStream;
 @Service
 public class CoursewareProjectService {
 
+    private static final Logger log = LoggerFactory.getLogger(CoursewareProjectService.class);
     private static final int MAX_SCRIPT_LENGTH = 50000;
     private static final int TTS_CHUNK_LENGTH = 4500;
     private final Map<String, ProjectState> projects = new ConcurrentHashMap<>();
@@ -132,6 +138,18 @@ public class CoursewareProjectService {
 
     public ProjectView get(String id, String owner) {
         return view(requireProject(id, owner));
+    }
+
+    public PageResult<ProjectView> list(String owner, Integer pageValue, Integer sizeValue) {
+        int page = Pagination.page(pageValue);
+        int size = Pagination.size(sizeValue);
+        List<ProjectView> window = projectRepository.findByOwner(
+                        normalizeOwner(owner), Pagination.offset(page, size), size + 1)
+                .stream()
+                .map(this::restore)
+                .map(this::view)
+                .toList();
+        return PageResult.fromWindow(window, page, size);
     }
 
     public ProjectView optimize(String id, String owner, String instruction) throws IOException {
@@ -245,6 +263,7 @@ public class CoursewareProjectService {
 
     public ProjectView generateVideo(String id, String owner) throws IOException {
         ProjectState state = requireProject(id, owner);
+        Path temporaryOutput = state.directory.resolve("recorded-course.tmp.mp4");
         synchronized (state) {
             begin(state);
             try {
@@ -280,14 +299,19 @@ public class CoursewareProjectService {
                     command.addAll(List.of("-map", "0:v:0", "-map", "1:a:0"));
                 }
                 command.addAll(List.of("-r", "25", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                        "-c:a", "aac", "-shortest", output.toString()));
+                        "-c:a", "aac", "-shortest", temporaryOutput.toString()));
                 run(command, "录播课程生成失败");
+                Files.move(temporaryOutput, output, StandardCopyOption.REPLACE_EXISTING);
                 state.video = output;
                 succeed(state);
                 return view(state);
             } catch (IOException | RuntimeException exception) {
                 fail(state, exception);
                 throw exception;
+            } finally {
+                deleteTemporary(temporaryOutput);
+                deleteTemporary(state.directory.resolve("slides.txt"));
+                deleteTemporaryDirectory(state.directory.resolve("slides"));
             }
         }
     }
@@ -310,9 +334,40 @@ public class CoursewareProjectService {
         List<String> lines = parts.stream().map(path -> "file '" + ffmpegPath(path) + "'").toList();
         Files.write(list, lines, StandardCharsets.UTF_8);
         Path output = state.directory.resolve("narration.wav");
-        run(List.of(ffmpegPath, "-hide_banner", "-y", "-f", "concat", "-safe", "0",
-                "-i", list.toString(), "-c", "copy", output.toString()), "长讲稿音频合并失败");
-        return output;
+        boolean succeeded = false;
+        try {
+            run(List.of(ffmpegPath, "-hide_banner", "-y", "-f", "concat", "-safe", "0",
+                    "-i", list.toString(), "-c", "copy", output.toString()), "长讲稿音频合并失败");
+            succeeded = true;
+            return output;
+        } finally {
+            deleteTemporary(list);
+            for (Path part : parts) {
+                deleteTemporary(part);
+            }
+            if (!succeeded) {
+                deleteTemporary(output);
+            }
+        }
+    }
+
+    private void deleteTemporary(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException exception) {
+            log.warn("课件临时文件清理失败: {}", path.getFileName());
+        }
+    }
+
+    private void deleteTemporaryDirectory(Path directory) {
+        if (!Files.exists(directory)) {
+            return;
+        }
+        try (var paths = Files.walk(directory)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(this::deleteTemporary);
+        } catch (IOException exception) {
+            log.warn("课件临时目录清理失败: {}", directory.getFileName());
+        }
     }
 
     private List<Path> renderSlides(ProjectState state) throws IOException {
@@ -449,7 +504,7 @@ public class CoursewareProjectService {
             }
         }
         if (state == null || !state.owner.equals(normalizedOwner)) {
-            throw new IllegalArgumentException("课件项目不存在或无权访问");
+            throw new ResourceNotFoundException("课件项目不存在或无权访问");
         }
         return state;
     }

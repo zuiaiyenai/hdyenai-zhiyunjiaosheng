@@ -1,5 +1,8 @@
 package com.a09.tts.task;
 
+import com.a09.tts.api.PageResult;
+import com.a09.tts.api.Pagination;
+import com.a09.tts.api.ResourceNotFoundException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -143,14 +146,21 @@ public class AsyncTaskService {
 
     public TaskRecord get(String id, String owner) {
         return repository.findByIdAndOwner(id, normalizeOwner(owner))
-                .orElseThrow(() -> new IllegalArgumentException("任务不存在或无权访问"));
+                .orElseThrow(() -> new ResourceNotFoundException("任务不存在或无权访问"));
+    }
+
+    public PageResult<TaskRecord> list(String owner, Integer pageValue, Integer sizeValue) {
+        int page = Pagination.page(pageValue);
+        int size = Pagination.size(sizeValue);
+        return PageResult.fromWindow(repository.findByOwner(
+                normalizeOwner(owner), Pagination.offset(page, size), size + 1), page, size);
     }
 
     public TaskRecord cancel(String id, String owner) {
         String normalizedOwner = normalizeOwner(owner);
         synchronized (lock(id)) {
             TaskRecord current = repository.findByIdAndOwner(id, normalizedOwner)
-                    .orElseThrow(() -> new IllegalArgumentException("任务不存在或无权访问"));
+                    .orElseThrow(() -> new ResourceNotFoundException("任务不存在或无权访问"));
             if (current.status().terminal()) {
                 return current;
             }

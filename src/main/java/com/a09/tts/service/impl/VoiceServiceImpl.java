@@ -1,5 +1,6 @@
 package com.a09.tts.service.impl;
 
+import com.a09.tts.cleanup.PendingFileCleanupService;
 import com.a09.tts.mapper.VoiceMapper;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.service.VoiceService;
@@ -9,10 +10,12 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.nio.file.Path;
-import com.a09.tts.util.UploadUtils;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.security.UploadSecurityService.Type;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +33,9 @@ public class VoiceServiceImpl implements VoiceService {
 
     @Autowired
     private UploadSecurityService uploadSecurity;
+
+    @Autowired
+    private PendingFileCleanupService pendingFileCleanupService;
 
     public List<Voice> findVoiceByName(String voiceName) {
         return voiceMapper.findVoiceByName(voiceName);
@@ -53,15 +59,26 @@ public class VoiceServiceImpl implements VoiceService {
             @CacheEvict(value = "voiceList", allEntries = true),
             @CacheEvict(value = "voiceById", key = "#voiceId")
     })
+    @Transactional
     public int deleteVoiceById(int voiceId) {
         Voice voice = voiceMapper.findVoiceById(voiceId);
-        if (voice != null && voice.getFilePath() != null) {
-            try {
-                UploadUtils.deleteWithin(Path.of(uploadDir), voice.getFilePath());
-            } catch (Exception ignored) {
+        int deleted = voiceMapper.deleteVoiceById(voiceId);
+        if (deleted == 1 && voice != null && voice.getFilePath() != null) {
+            Runnable cleanup = () -> pendingFileCleanupService.deleteOrEnqueue(
+                    PendingFileCleanupService.VOICE_STORAGE, voice.getFilePath());
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(
+                        new TransactionSynchronization() {
+                            @Override
+                            public void afterCommit() {
+                                cleanup.run();
+                            }
+                        });
+            } else {
+                cleanup.run();
             }
         }
-        return voiceMapper.deleteVoiceById(voiceId);
+        return deleted;
     }
 
     @Caching(evict = {
@@ -91,7 +108,8 @@ public class VoiceServiceImpl implements VoiceService {
             voiceMapper.addVoiceSample(voice);
             return voice;
         } catch (Exception exception) {
-            UploadUtils.deleteWithin(Path.of(uploadDir), saved.toString());
+            pendingFileCleanupService.deleteOrEnqueue(
+                    PendingFileCleanupService.VOICE_STORAGE, voice.getFilePath());
             throw exception;
         }
     }

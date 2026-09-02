@@ -28,6 +28,17 @@ public class InMemoryCoursewareProjectRepository implements CoursewareProjectRep
     }
 
     @Override
+    public List<ProjectData> findByOwner(String owner, int offset, int limit) {
+        return projects.values().stream()
+                .filter(project -> project.owner().equals(owner))
+                .sorted(Comparator.comparing(ProjectData::updatedAt).reversed()
+                        .thenComparing(ProjectData::projectId, Comparator.reverseOrder()))
+                .skip(offset)
+                .limit(limit)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
+
+    @Override
     public void saveRevision(RevisionData revision) {
         revisions.computeIfAbsent(revision.projectId(), ignored -> new ConcurrentHashMap<>())
                 .put(revision.revisionNumber(), revision);

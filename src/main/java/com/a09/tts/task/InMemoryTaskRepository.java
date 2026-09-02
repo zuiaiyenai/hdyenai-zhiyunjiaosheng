@@ -4,6 +4,8 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -26,6 +28,17 @@ public class InMemoryTaskRepository implements TaskRepository {
     public Optional<TaskRecord> findByIdAndOwner(String id, String owner) {
         TaskRecord task = tasks.get(id);
         return task != null && task.owner().equals(owner) ? Optional.of(task) : Optional.empty();
+    }
+
+    @Override
+    public List<TaskRecord> findByOwner(String owner, int offset, int limit) {
+        return tasks.values().stream()
+                .filter(task -> task.owner().equals(owner))
+                .sorted(Comparator.comparing(TaskRecord::createdAt).reversed()
+                        .thenComparing(TaskRecord::id, Comparator.reverseOrder()))
+                .skip(offset)
+                .limit(limit)
+                .toList();
     }
 
     @Override

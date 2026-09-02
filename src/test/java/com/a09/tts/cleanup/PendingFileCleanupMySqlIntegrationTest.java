@@ -1,4 +1,4 @@
-package com.a09.tts.task;
+package com.a09.tts.cleanup;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
@@ -6,16 +6,13 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
-import java.time.Instant;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 
 @EnabledIfEnvironmentVariable(named = "MYSQL_INTEGRATION_URL", matches = "jdbc:mysql:.*")
-class AsyncTaskMySqlIntegrationTest {
+class PendingFileCleanupMySqlIntegrationTest {
 
     @Test
-    void migratesPersistsScopesAndRecoversTasks() {
+    void migratesAndPersistsCleanupQueue() {
         String url = requiredEnvironment("MYSQL_INTEGRATION_URL");
         String username = requiredEnvironment("MYSQL_INTEGRATION_USERNAME");
         String password = System.getenv().getOrDefault("MYSQL_INTEGRATION_PASSWORD", "");
@@ -29,22 +26,16 @@ class AsyncTaskMySqlIntegrationTest {
             flyway.migrate();
             JdbcTemplate jdbc = new JdbcTemplate(
                     new DriverManagerDataSource(url, username, password));
-            JdbcTaskRepository first = new JdbcTaskRepository(jdbc);
-            Instant now = Instant.now();
-            first.save(new TaskRecord(
-                    "00000000-0000-0000-0000-000000000005", "alice", "COURSEWARE_VIDEO",
-                    TaskStatus.RUNNING, 10, null, null, "project:1",
-                    now, now, null));
+            JdbcPendingFileCleanupRepository repository =
+                    new JdbcPendingFileCleanupRepository(jdbc);
 
-            JdbcTaskRepository restarted = new JdbcTaskRepository(jdbc);
-            TaskRecord restored = restarted.findByIdAndOwner(
-                    "00000000-0000-0000-0000-000000000005", "alice").orElseThrow();
-            assertEquals(TaskStatus.RUNNING, restored.status());
-            assertFalse(restarted.findByIdAndOwner(restored.id(), "bob").isPresent());
-            assertEquals(1, restarted.markInterruptedTasksFailed(
-                    Instant.now(), "应用重启导致任务中断"));
-            assertEquals(TaskStatus.FAILED,
-                    restarted.findById(restored.id()).orElseThrow().status());
+            repository.enqueue(PendingFileCleanupService.VOICE_STORAGE, "alice/voice.wav");
+            PendingFileCleanup entry = repository.findBatch(100).get(0);
+            assertEquals("alice/voice.wav", entry.relativePath());
+            repository.markFailed(entry.id(), "文件清理失败");
+            assertEquals(1, repository.findBatch(100).get(0).attempts());
+            repository.delete(entry.id());
+            assertEquals(0, repository.findBatch(100).size());
             assertEquals(4, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
         } finally {
@@ -63,9 +54,9 @@ class AsyncTaskMySqlIntegrationTest {
     private void requireDedicatedVerificationSchema(String url) {
         String withoutQuery = url.replaceFirst("\\?.*$", "");
         String schema = withoutQuery.substring(withoutQuery.lastIndexOf('/') + 1);
-        if (!schema.matches("tts_phase5_verify_[a-zA-Z0-9_]+")) {
+        if (!schema.matches("tts_phase6_verify_[a-zA-Z0-9_]+")) {
             throw new IllegalArgumentException(
-                    "MYSQL_INTEGRATION_URL must target a dedicated tts_phase5_verify_* schema");
+                    "MYSQL_INTEGRATION_URL must target a dedicated tts_phase6_verify_* schema");
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.Pagination;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.util.UploadUtils;
 import com.a09.tts.security.UploadSecurityService;
@@ -57,21 +58,34 @@ public class VoiceNoDbController {
     }
 
     @GetMapping("/list")
-    public List<Voice> list(HttpServletRequest request) {
+    public Object list(
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
+            HttpServletRequest request) {
+        List<Voice> visible = visibleVoices(request);
+        return page == null && size == null ? visible : Pagination.slice(visible, page, size);
+    }
+
+    @GetMapping("/search")
+    public Object search(
+            @RequestParam("name") String name,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
+            HttpServletRequest request) {
+        String keyword = name == null ? "" : name.trim().toLowerCase();
+        List<Voice> matches = visibleVoices(request).stream()
+                .filter(voice -> voice.getVoiceName() != null
+                        && voice.getVoiceName().toLowerCase().contains(keyword))
+                .toList();
+        return page == null && size == null ? matches : Pagination.slice(matches, page, size);
+    }
+
+    private List<Voice> visibleVoices(HttpServletRequest request) {
         String username = username(request);
         return voices.values().stream()
                 .filter(voice -> Boolean.TRUE.equals(voice.getPublicVisible())
                         || username.equals(voice.getOwnerUsername()))
                 .sorted(Comparator.comparing(Voice::getVoiceId))
-                .toList();
-    }
-
-    @GetMapping("/search")
-    public List<Voice> search(@RequestParam("name") String name, HttpServletRequest request) {
-        String keyword = name == null ? "" : name.trim().toLowerCase();
-        return list(request).stream()
-                .filter(voice -> voice.getVoiceName() != null
-                        && voice.getVoiceName().toLowerCase().contains(keyword))
                 .toList();
     }
 

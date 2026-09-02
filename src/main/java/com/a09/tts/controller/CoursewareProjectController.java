@@ -1,10 +1,10 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.PageResult;
 import com.a09.tts.service.CoursewareProjectService;
 import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
 import com.a09.tts.task.AsyncTaskService;
-import com.a09.tts.task.AsyncTaskService.TaskCapacityException;
 import com.a09.tts.task.AsyncTaskService.TaskSubmission;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -52,6 +52,13 @@ public class CoursewareProjectController {
     @GetMapping("/{id}")
     public ProjectView get(@PathVariable String id) {
         return projectService.get(id, currentUsername());
+    }
+
+    @GetMapping
+    public PageResult<ProjectView> list(
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size) {
+        return projectService.list(currentUsername(), page, size);
     }
 
     @PostMapping("/{id}/optimize")
@@ -139,11 +146,7 @@ public class CoursewareProjectController {
     }
 
     private ResponseEntity<TaskSubmission> submit(TaskSupplier supplier) {
-        try {
-            return ResponseEntity.status(HttpStatus.ACCEPTED).body(supplier.submit());
-        } catch (TaskCapacityException exception) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
-        }
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(supplier.submit());
     }
 
     private String currentUsername() {

@@ -52,6 +52,15 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<TaskRecord> findByOwner(String owner, int offset, int limit) {
+        return jdbcTemplate.query(
+                "SELECT " + COLUMNS + " FROM async_task "
+                        + "WHERE owner_username = ? "
+                        + "ORDER BY created_at DESC, task_id DESC LIMIT ? OFFSET ?",
+                this::map, owner, limit, offset);
+    }
+
+    @Override
     public int markInterruptedTasksFailed(Instant finishedAt, String reason) {
         return jdbcTemplate.update("""
                 UPDATE async_task

@@ -1,5 +1,6 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.PageResult;
 import com.a09.tts.task.AsyncTaskService;
 import com.a09.tts.task.TaskRecord;
 import jakarta.servlet.http.HttpServletRequest;
@@ -7,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
@@ -25,6 +27,15 @@ public class TaskController {
     @GetMapping("/{id}")
     public TaskView get(@PathVariable String id) {
         return view(taskService.get(id, currentUsername()));
+    }
+
+    @GetMapping
+    public PageResult<TaskView> list(
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size) {
+        PageResult<TaskRecord> tasks = taskService.list(currentUsername(), page, size);
+        return new PageResult<>(tasks.content().stream().map(this::view).toList(),
+                tasks.page(), tasks.size(), tasks.hasNext());
     }
 
     @PostMapping("/{id}/cancel")

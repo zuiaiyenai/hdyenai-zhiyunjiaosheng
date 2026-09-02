@@ -39,7 +39,8 @@ class CoursewareMediaIntegrationTest {
 
         PPTService pptService = mock(PPTService.class);
         TTSService ttsService = mock(TTSService.class);
-        when(pptService.processPptAndGenerateContent(any())).thenReturn("欢迎学习人工智能导论。");
+        when(pptService.processPptAndGenerateContent(any()))
+                .thenReturn("欢迎学习人工智能导论。".repeat(500));
         when(ttsService.tts(anyString(), anyString(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(ResponseEntity.ok(oneSecondWav()));
 
@@ -61,6 +62,15 @@ class CoursewareMediaIntegrationTest {
         CoursewareProjectService.DownloadArtifact artifact =
                 service.download(project.id(), "alice", "video");
         assertTrue(Files.size(artifact.path()) > 1000);
+        Path projectDirectory = artifact.path().getParent();
+        assertTrue(Files.notExists(projectDirectory.resolve("audio-parts.txt")));
+        assertTrue(Files.notExists(projectDirectory.resolve("narration-001.wav")));
+        assertTrue(Files.notExists(projectDirectory.resolve("narration-002.wav")));
+        assertTrue(Files.notExists(projectDirectory.resolve("slides.txt")));
+        assertTrue(Files.notExists(projectDirectory.resolve("slides")));
+        assertTrue(Files.notExists(projectDirectory.resolve("recorded-course.tmp.mp4")));
+        assertTrue(Files.isRegularFile(projectDirectory.resolve("narration.wav")));
+        assertTrue(Files.isRegularFile(artifact.path()));
     }
 
     private byte[] oneSlidePptx() throws Exception {

@@ -37,6 +37,8 @@ server:
   port: "${SERVER_PORT:8081}"
 
 app:
+  cleanup:
+    retry-delay: "${FILE_CLEANUP_RETRY_DELAY:5m}"
   tasks:
     core-pool-size: "${TASK_CORE_POOL_SIZE:2}"
     max-pool-size: "${TASK_MAX_POOL_SIZE:4}"

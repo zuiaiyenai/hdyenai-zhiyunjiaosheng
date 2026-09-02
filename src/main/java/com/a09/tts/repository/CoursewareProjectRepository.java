@@ -9,6 +9,8 @@ public interface CoursewareProjectRepository {
 
     Optional<ProjectData> findByIdAndOwner(String projectId, String owner);
 
+    List<ProjectData> findByOwner(String owner, int offset, int limit);
+
     void saveRevision(RevisionData revision);
 
     List<RevisionData> findRevisions(String projectId);

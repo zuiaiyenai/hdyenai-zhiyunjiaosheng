@@ -51,7 +51,7 @@ class CoursewarePersistenceMySqlIntegrationTest {
             assertEquals("owner/project/narration.wav", restored.audioPath());
             assertEquals(1, restarted.findRevisions(restored.projectId()).size());
             assertFalse(restarted.findByIdAndOwner(restored.projectId(), "bob").isPresent());
-            assertEquals(3, jdbc.queryForObject(
+            assertEquals(4, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
         } finally {
             flyway.clean();

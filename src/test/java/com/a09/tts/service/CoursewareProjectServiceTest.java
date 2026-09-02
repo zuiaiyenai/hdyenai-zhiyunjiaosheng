@@ -5,6 +5,8 @@ import com.a09.tts.repository.InMemoryCoursewareProjectRepository;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
+import com.a09.tts.api.PageResult;
+import com.a09.tts.api.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.ResponseEntity;
@@ -58,16 +60,16 @@ class CoursewareProjectServiceTest {
         assertEquals("人工智能导论", created.title());
         assertEquals(0, created.revision());
         assertEquals("SUCCEEDED", created.status());
-        assertThrows(IllegalArgumentException.class, () -> service.get(created.id(), "bob"));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(ResourceNotFoundException.class, () -> service.get(created.id(), "bob"));
+        assertThrows(ResourceNotFoundException.class,
                 () -> service.optimize(created.id(), "bob", "越权修改"));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(ResourceNotFoundException.class,
                 () -> service.updateScript(created.id(), "bob", "越权讲稿"));
         MockMultipartFile avatar = new MockMultipartFile(
                 "avatar", "avatar.png", "image/png", png());
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(ResourceNotFoundException.class,
                 () -> service.uploadAvatar(created.id(), "bob", avatar));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(ResourceNotFoundException.class,
                 () -> service.download(created.id(), "bob", "package"));
 
         ProjectView optimized = service.optimize(created.id(), "alice", "增加课堂提问");
@@ -147,6 +149,30 @@ class CoursewareProjectServiceTest {
         CoursewareProjectService service = service(mock(PPTService.class), repository);
 
         assertThrows(IllegalArgumentException.class, () -> service.get("unsafe", "alice"));
+    }
+
+    @Test
+    void paginatesProjectsWithinOwnerBoundary() throws Exception {
+        PPTService pptService = mock(PPTService.class);
+        when(pptService.processPptAndGenerateContent(any())).thenReturn("分页测试讲稿");
+        InMemoryCoursewareProjectRepository repository = new InMemoryCoursewareProjectRepository();
+        CoursewareProjectService service = service(pptService, repository);
+
+        service.create(new MockMultipartFile("file", "alice-1.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation", pptx()), "alice");
+        service.create(new MockMultipartFile("file", "bob.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation", pptx()), "bob");
+        service.create(new MockMultipartFile("file", "alice-2.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation", pptx()), "alice");
+
+        PageResult<ProjectView> first = service.list("alice", 0, 1);
+        PageResult<ProjectView> second = service.list("alice", 1, 1);
+        assertEquals(1, first.content().size());
+        assertTrue(first.hasNext());
+        assertEquals(1, second.content().size());
+        assertTrue(!second.hasNext());
+        assertTrue(first.content().stream().noneMatch(project -> project.title().equals("bob")));
+        assertThrows(IllegalArgumentException.class, () -> service.list("alice", 0, 101));
     }
 
     private CoursewareProjectService service(PPTService pptService,

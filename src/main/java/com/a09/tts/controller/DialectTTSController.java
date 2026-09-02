@@ -1,5 +1,6 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.ServiceUnavailableException;
 import com.a09.tts.service.AliyunSpeechService;
 import com.a09.tts.service.DialectVoiceCatalog;
 import com.a09.tts.service.DialectTextEnhancer;
@@ -59,11 +60,10 @@ public class DialectTTSController {
             headers.setCacheControl(CacheControl.noStore());
             return new ResponseEntity<>(audio, headers, HttpStatus.OK);
         } catch (IllegalArgumentException exception) {
-            return ResponseEntity.badRequest().body(Map.of("code", 400, "msg", exception.getMessage()));
+            throw exception;
         } catch (Exception exception) {
             log.error("阿里云方言语音合成失败，voice={}", voiceId, exception);
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .body(Map.of("code", 503, "msg", exception.getMessage()));
+            throw new ServiceUnavailableException("阿里云方言语音合成失败", exception);
         }
     }
 
@@ -90,7 +90,7 @@ public class DialectTTSController {
             headers.setCacheControl(CacheControl.noStore());
             return ResponseEntity.ok().headers(headers).body(body);
         } catch (IllegalArgumentException exception) {
-            return ResponseEntity.badRequest().body(Map.of("code", 400, "msg", exception.getMessage()));
+            throw exception;
         }
     }
 }

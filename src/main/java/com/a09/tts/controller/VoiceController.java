@@ -1,5 +1,6 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.Pagination;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,16 +38,24 @@ public class VoiceController {
     private String uploadDir;
 
     @GetMapping("/list")
-    public ResponseEntity<List<Voice>> listAllVoices(HttpServletRequest request) {
+    public ResponseEntity<?> listAllVoices(
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
+            HttpServletRequest request) {
         List<Voice> voices = voiceService.findVisibleVoices(username(request));
-        return ResponseEntity.ok(voices);
+        return ResponseEntity.ok(page == null && size == null
+                ? voices : Pagination.slice(voices, page, size));
     }
 
     @GetMapping("/search")
-    public ResponseEntity<List<Voice>> searchVoices(
-            @RequestParam("name") String name, HttpServletRequest request) {
+    public ResponseEntity<?> searchVoices(
+            @RequestParam("name") String name,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
+            HttpServletRequest request) {
         List<Voice> voices = voiceService.findVisibleVoiceByName(name, username(request));
-        return ResponseEntity.ok(voices);
+        return ResponseEntity.ok(page == null && size == null
+                ? voices : Pagination.slice(voices, page, size));
     }
 
     @PostMapping("/add")
@@ -59,60 +68,44 @@ public class VoiceController {
     public ResponseEntity<Map<String, Object>> updateVoice(
             @RequestBody Voice voice, HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
-        try {
-            Voice current = voiceService.findById(voice.getVoiceId());
-            if (current == null) {
-                return ResponseEntity.notFound().build();
-            }
-            if (!canManage(current, request)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-            }
-            int res = voiceService.updateVoiceSample(voice);
-            if (res == 1) {
-                result.put("code", 200);
-                result.put("msg", "声音样本更新成功");
-                return ResponseEntity.ok(result);
-            } else {
-                result.put("code", 400);
-                result.put("msg", "声音样本更新失败");
-                return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
-            }
-        } catch (Exception e) {
-            log.error("更新声音样本失败", e);
-            result.put("code", 500);
-            result.put("msg", e.getMessage());
-            return new ResponseEntity<>(result, HttpStatus.INTERNAL_SERVER_ERROR);
+        Voice current = voiceService.findById(voice.getVoiceId());
+        if (current == null) {
+            return ResponseEntity.notFound().build();
         }
+        if (!canManage(current, request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        int res = voiceService.updateVoiceSample(voice);
+        if (res == 1) {
+            result.put("code", 200);
+            result.put("msg", "声音样本更新成功");
+            return ResponseEntity.ok(result);
+        }
+        result.put("code", 400);
+        result.put("msg", "声音样本更新失败");
+        return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
     }
 
     @DeleteMapping("/delete/{voiceId}")
     public ResponseEntity<Map<String, Object>> deleteVoice(
             @PathVariable int voiceId, HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
-        try {
-            Voice current = voiceService.findById(voiceId);
-            if (current == null) {
-                return ResponseEntity.notFound().build();
-            }
-            if (!canManage(current, request)) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-            }
-            int res = voiceService.deleteVoiceById(voiceId);
-            if (res == 1) {
-                result.put("code", 200);
-                result.put("msg", "声音样本删除成功");
-                return ResponseEntity.ok(result);
-            } else {
-                result.put("code", 400);
-                result.put("msg", "声音样本删除失败");
-                return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
-            }
-        } catch (Exception e) {
-            log.error("删除声音样本失败", e);
-            result.put("code", 500);
-            result.put("msg", e.getMessage());
-            return new ResponseEntity<>(result, HttpStatus.INTERNAL_SERVER_ERROR);
+        Voice current = voiceService.findById(voiceId);
+        if (current == null) {
+            return ResponseEntity.notFound().build();
         }
+        if (!canManage(current, request)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        int res = voiceService.deleteVoiceById(voiceId);
+        if (res == 1) {
+            result.put("code", 200);
+            result.put("msg", "声音样本删除成功");
+            return ResponseEntity.ok(result);
+        }
+        result.put("code", 400);
+        result.put("msg", "声音样本删除失败");
+        return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
