@@ -3,6 +3,7 @@
   const labels=["文本转语音","声音样本库","声音克隆","辅助功能","课件制作下载","口语练习与点评","学习报告"];
   let initialized=false;
   let objectUrl="";
+  let subtitleObjectUrl="";
   let audioObjectUrl="";
   let activeAudio=null;
   let authTokenAtLoad=localStorage.getItem("token")||"";
@@ -266,10 +267,12 @@
       '<h2>上传视频</h2>',
       '<label class="video-file-drop">选择需要换声的 MP4 / MOV 视频<input id="video-swap-file" type="file" accept="video/*"></label>',
       '<label class="video-voice-field">选择音色替换原声<select id="video-swap-voice"><option value="longxiao">女声 · 温柔自然</option><option value="longcheng">男声 · 沉稳清晰</option><option value="default">默认音色</option></select></label>',
-      '<div class="video-swap-actions"><button id="video-swap-submit" class="primary" type="button">开始换声</button><button id="video-swap-download" class="secondary" type="button" disabled>下载视频</button></div>',
+      '<label class="video-subtitle-option"><input id="video-swap-include-subtitles" type="checkbox" checked> 自动生成并写入字幕</label>',
+      '<div class="video-swap-actions"><button id="video-swap-analyze" class="secondary" type="button">生成字幕并预览</button><button id="video-swap-submit" class="primary" type="button">开始换声</button><button id="video-swap-download" class="secondary" type="button" disabled>保存到本地</button></div>',
+      '<label class="video-subtitle-field">字幕内容（SRT，可直接校正文字和时间）<textarea id="video-swap-subtitles" rows="8" disabled placeholder="选择视频后，点击“生成字幕并预览”"></textarea></label>',
       '<p id="video-swap-status" class="video-swap-status">上传后可先预览原视频</p>',
       '</div>',
-      '<div class="video-swap-preview"><h2>视频预览</h2><video id="video-swap-player" controls preload="metadata" playsinline></video></div>'
+      '<div class="video-swap-preview"><h2>原视频 / 字幕 / 换声效果预览</h2><video id="video-swap-player" controls preload="metadata" playsinline></video></div>'
     ].join("");
     main.appendChild(page);
     const button=node("button","nav-btn","视频换声");
@@ -280,8 +283,50 @@
     const fileInput=page.querySelector("#video-swap-file");
     const player=page.querySelector("#video-swap-player");
     const status=page.querySelector("#video-swap-status");
+    const analyze=page.querySelector("#video-swap-analyze");
     const submit=page.querySelector("#video-swap-submit");
     const download=page.querySelector("#video-swap-download");
+    const includeSubtitles=page.querySelector("#video-swap-include-subtitles");
+    const subtitleEditor=page.querySelector("#video-swap-subtitles");
+    let transcript="";
+    function clearSubtitleTrack(){
+      player.querySelectorAll("track[data-video-subtitles]").forEach(track=>track.remove());
+      if(subtitleObjectUrl)URL.revokeObjectURL(subtitleObjectUrl);
+      subtitleObjectUrl="";
+    }
+    function srtToVtt(srt){
+      return "WEBVTT\n\n"+srt.replace(/\r\n/g,"\n")
+        .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g,"$1.$2");
+    }
+    function subtitleText(srt){
+      return srt.replace(/\r/g,"").split("\n")
+        .map(line=>line.trim())
+        .filter(line=>line
+          && !/^\d+$/.test(line)
+          && !/^\d{2}:\d{2}:\d{2},\d{3}\s+-->/.test(line))
+        .join(" ");
+    }
+
+    function updateSubtitlePreview(){
+      clearSubtitleTrack();
+      if(!includeSubtitles.checked||!subtitleEditor.value.trim())return;
+      subtitleObjectUrl=URL.createObjectURL(new Blob(
+        [srtToVtt(subtitleEditor.value)],{type:"text/vtt;charset=utf-8"}));
+      const track=document.createElement("track");
+      track.kind="subtitles";
+      track.label="自动字幕";
+      track.srclang="zh";
+      track.src=subtitleObjectUrl;
+      track.default=true;
+      track.dataset.videoSubtitles="true";
+      track.addEventListener("load",()=>{track.track.mode="showing"},{once:true});
+      player.appendChild(track);
+    }
+    includeSubtitles.addEventListener("change",()=>{
+      subtitleEditor.disabled=!includeSubtitles.checked||!transcript;
+      updateSubtitlePreview();
+    });
+    subtitleEditor.addEventListener("input",updateSubtitlePreview);
     fileInput.addEventListener("change",()=>{
       const file=fileInput.files&&fileInput.files[0];
       if(!file)return;
@@ -304,12 +349,16 @@
         status.textContent="浏览器无法解码该视频画面，请使用 H.264 编码的 MP4 视频";
       },{once:true});
       player.load();
+      transcript="";
+      subtitleEditor.value="";
+      subtitleEditor.disabled=true;
+      clearSubtitleTrack();
       download.disabled=true;
       download.removeAttribute("data-url");
       status.className="video-swap-status";
       status.textContent="已选择："+file.name;
     });
-    submit.addEventListener("click",async()=>{
+    analyze.addEventListener("click",async()=>{
       const file=fileInput.files&&fileInput.files[0];
       if(!file){
         status.className="video-swap-status error";
@@ -320,28 +369,77 @@
       const token=localStorage.getItem("token")||"";
       const form=new FormData();
       form.append("video",file);
-      form.append("voiceType",page.querySelector("#video-swap-voice").value);
+      analyze.disabled=true;
       submit.disabled=true;
+      status.className="video-swap-status";
+      status.textContent="正在识别语音并生成时间轴字幕……";
+      try{
+        const headers=token?{Authorization:"Bearer "+token}:{};
+        const response=await fetch(baseUrl+"/video_voice_swap/subtitles",{method:"POST",headers,body:form});
+        if(!response.ok)throw new Error((await response.text())||("字幕生成失败（"+response.status+"）"));
+        const data=await response.json();
+        transcript=(data.transcript||"").trim();
+        subtitleEditor.value=data.subtitles||"";
+        subtitleEditor.disabled=!includeSubtitles.checked;
+        updateSubtitlePreview();
+        status.textContent=data.timingSource==="asr"
+          ?"字幕已按语音时间轴生成，请播放视频试听并校正"
+          :"ASR 未返回分段时间，字幕已按视频时长估算，请播放并校正";
+      }catch(error){
+        status.className="video-swap-status error";
+        status.textContent=error&&error.message?error.message:"字幕生成失败";
+      }finally{
+        analyze.disabled=false;
+        submit.disabled=false;
+      }
+    });
+    submit.addEventListener("click",async()=>{
+      const file=fileInput.files&&fileInput.files[0];
+      if(!file){
+        status.className="video-swap-status error";
+        status.textContent="请先选择视频文件";
+        return;
+      }
+      if(!transcript){
+        status.className="video-swap-status error";
+        status.textContent="请先点击“生成字幕并预览”，确认识别文本后再换声";
+        return;
+      }
+      const baseUrl=(localStorage.getItem("zyjs_api")||window.location.origin).replace(/\/$/,"");
+      const token=localStorage.getItem("token")||"";
+      const form=new FormData();
+      form.append("video",file);
+      form.append("voiceType",page.querySelector("#video-swap-voice").value);
+      const correctedTranscript=includeSubtitles.checked
+        ? subtitleText(subtitleEditor.value)
+        : transcript;
+      form.append("transcript",correctedTranscript);
+      form.append("includeSubtitles",String(includeSubtitles.checked));
+      if(includeSubtitles.checked)form.append("subtitles",subtitleEditor.value);
+      submit.disabled=true;
+      analyze.disabled=true;
       download.disabled=true;
       status.className="video-swap-status";
-      status.textContent="正在识别、合成并替换视频原声，请稍候……";
+      status.textContent="正在合成换声与字幕，请稍候……";
       try{
         const headers=token?{Authorization:"Bearer "+token}:{};
         const response=await fetch(baseUrl+"/video_voice_swap/process",{method:"POST",headers,body:form});
         if(!response.ok)throw new Error((await response.text())||("处理失败（"+response.status+"）"));
         const blob=await response.blob();
+        clearSubtitleTrack();
         if(objectUrl)URL.revokeObjectURL(objectUrl);
         objectUrl=URL.createObjectURL(blob);
         player.src=objectUrl;
         download.dataset.url=objectUrl;
         download.dataset.name="智韵教声-换声视频.mp4";
         download.disabled=false;
-        status.textContent="视频换声完成，可预览或下载";
+        status.textContent="视频换声完成，可试听效果或保存到本地";
       }catch(error){
         status.className="video-swap-status error";
         status.textContent=error&&error.message?error.message:"视频换声失败";
       }finally{
         submit.disabled=false;
+        analyze.disabled=false;
       }
     });
     download.addEventListener("click",()=>{
@@ -507,6 +605,7 @@
     showHome(homeButton);
     window.addEventListener("beforeunload",()=>{
       if(objectUrl)URL.revokeObjectURL(objectUrl);
+      if(subtitleObjectUrl)URL.revokeObjectURL(subtitleObjectUrl);
       if(audioObjectUrl)URL.revokeObjectURL(audioObjectUrl);
     });
     window.videoLayout={showHome:()=>showHome(homeButton),showVideoSwap:()=>showVideoSwap(videoButton)};

@@ -7,4 +7,6 @@ import java.io.IOException;
 public interface PPTService {
 
     String processPptAndGenerateContent(MultipartFile file) throws IOException;
+
+    String optimizeCoursewareContent(String currentScript, String instruction);
 }

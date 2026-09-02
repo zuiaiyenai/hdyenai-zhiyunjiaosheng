@@ -91,30 +91,53 @@ public class PPTServiceImpl implements PPTService {
     }
 
     private String generateCoursewareContent(String fileContent) {
+        try {
+            return generateWithRetry(
+                    "你是专业的教学设计助手。请提供安全、准确、结构清晰、可直接朗读的教学讲稿。",
+                    "请根据以下 PPT 内容生成上课讲稿，要求按教学逻辑组织、重点突出，并保留必要的过渡语：\n\n" + fileContent,
+                    "课件生成");
+        } catch (IllegalStateException exception) {
+            return exception.getMessage();
+        }
+    }
+
+    @Override
+    public String optimizeCoursewareContent(String currentScript, String instruction) {
+        if (currentScript == null || currentScript.isBlank()) {
+            throw new IllegalArgumentException("当前讲稿不能为空");
+        }
+        if (instruction == null || instruction.isBlank()) {
+            throw new IllegalArgumentException("请输入讲稿调整要求");
+        }
+        return generateWithRetry(
+                "你是专业的教学讲稿编辑。只输出修改后的完整讲稿，不解释修改过程，不虚构原稿没有的事实。",
+                "当前讲稿：\n" + currentScript + "\n\n本轮调整要求：\n" + instruction,
+                "讲稿优化");
+    }
+
+    private String generateWithRetry(String systemPrompt, String userPrompt, String operation) {
         int maxAttempts = Math.max(1, rateLimitMaxAttempts);
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                log.info("调用 Moonshot 生成课件内容...");
-                return moonshotChatClient.generate(
-                        "你是 Kimi，由 Moonshot AI 提供的人工智能助手。请提供安全、准确、结构清晰的教学内容。",
-                        "请根据以下 PPT 内容生成上课的课件文本，要求结构清晰、重点突出：\n\n" + fileContent);
+                log.info("调用 Moonshot 执行{}...", operation);
+                return moonshotChatClient.generate(systemPrompt, userPrompt);
             } catch (Exception e) {
                 if (!isRateLimitError(e)) {
-                    log.error("Moonshot 课件生成失败: {}", e.getMessage());
-                    return "课件生成失败，请检查 Moonshot API 配置。";
+                    log.error("Moonshot {}失败: {}", operation, e.getMessage());
+                    throw new IllegalStateException(operation + "失败，请检查 Moonshot API 配置。", e);
                 }
                 if (attempt == maxAttempts) {
-                    log.warn("Moonshot 课件生成持续限流，已尝试 {} 次", attempt);
-                    return RATE_LIMIT_MESSAGE;
+                    log.warn("Moonshot {}持续限流，已尝试 {} 次", operation, attempt);
+                    throw new IllegalStateException(RATE_LIMIT_MESSAGE, e);
                 }
-                log.warn("Moonshot 课件生成被限流，第 {} 次重试将在 {} ms 后执行", attempt,
+                log.warn("Moonshot {}被限流，第 {} 次重试将在 {} ms 后执行", operation, attempt,
                         rateLimitRetryDelayMs);
                 if (!waitBeforeRetry()) {
-                    return RATE_LIMIT_MESSAGE;
+                    throw new IllegalStateException(RATE_LIMIT_MESSAGE, e);
                 }
             }
         }
-        return RATE_LIMIT_MESSAGE;
+        throw new IllegalStateException(RATE_LIMIT_MESSAGE);
     }
 
     private boolean waitBeforeRetry() {

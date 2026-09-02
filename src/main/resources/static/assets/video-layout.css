@@ -41,6 +41,9 @@ main{flex:1;width:100%;max-width:none;height:auto;min-height:0;margin:0;padding:
 .video-file-drop{min-height:120px;display:grid;place-items:center;padding:18px;background:rgba(255,255,255,.92);border:2px dashed rgba(68,135,172,.4);color:#668295;text-align:center}
 .video-file-drop input{display:block;max-width:100%;margin-top:12px}.video-voice-field{display:block;margin-top:28px;font-weight:700}
 .video-voice-field select{width:100%;margin-top:10px;padding:9px;border:1px solid #8eb9cf;background:#fff}.video-swap-actions{display:flex;gap:10px;justify-content:center;margin-top:22px}
+.video-subtitle-option{display:flex;align-items:center;gap:8px;margin-top:16px;font-weight:700}.video-subtitle-option input{width:16px;height:16px}
+.video-subtitle-field{display:block;margin-top:18px;font-weight:700}.video-subtitle-field textarea{box-sizing:border-box;width:100%;margin-top:8px;padding:10px;border:1px solid #8eb9cf;border-radius:4px;resize:vertical;font:13px/1.5 Consolas,monospace}
+.video-subtitle-field textarea:disabled{background:#edf3f6;color:#6c7d86}.video-swap-actions{flex-wrap:wrap}
 .video-swap-preview{display:flex;flex-direction:column;padding:18px;background:rgba(255,255,255,.16);border-radius:6px}.video-swap-preview h2{padding:10px;background:rgba(48,86,112,.83);color:#fff}
 .video-swap-preview video{width:100%;min-height:310px;max-height:56vh;background:#111}.video-swap-status{min-height:18px;margin:10px 0 0;text-align:center;color:#244a62}.video-swap-status.error{color:#9c3030}
 .page:has(>.video-subnav){position:relative;min-height:480px;padding-left:164px}
