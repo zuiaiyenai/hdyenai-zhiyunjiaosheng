@@ -2,6 +2,8 @@ package com.a09.tts.controller;
 
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.util.UploadUtils;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ContentDisposition;
@@ -27,7 +29,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -38,13 +39,21 @@ public class VoiceNoDbController {
     private final Map<Integer, Voice> voices = new ConcurrentHashMap<>();
     private final AtomicInteger sequence = new AtomicInteger();
     private final String uploadDir;
+    private final UploadSecurityService uploadSecurity;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public VoiceNoDbController(
-            @org.springframework.beans.factory.annotation.Value("${app.upload-dir}") String uploadDir) {
+            @org.springframework.beans.factory.annotation.Value("${app.upload-dir}") String uploadDir,
+            UploadSecurityService uploadSecurity) {
         this.uploadDir = uploadDir;
+        this.uploadSecurity = uploadSecurity;
         addDefault("知性女声", "教育教学");
         addDefault("沉稳男声", "知识讲解");
         addDefault("活力童声", "少儿阅读");
+    }
+
+    public VoiceNoDbController(String uploadDir) {
+        this(uploadDir, new UploadSecurityService());
     }
 
     @GetMapping("/list")
@@ -76,16 +85,17 @@ public class VoiceNoDbController {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("音色名称不能为空");
         }
-        Path saved = UploadUtils.save(file, Path.of(uploadDir),
-                Set.of(".wav", ".mp3", ".m4a", ".flac", ".ogg"));
+        Path root = Path.of(uploadDir).toAbsolutePath().normalize();
+        String owner = username(request);
+        Path saved = uploadSecurity.save(file, root, Type.AUDIO, owner);
         Voice voice = new Voice();
         voice.setVoiceId(sequence.incrementAndGet());
         voice.setVoiceName(name.trim());
         voice.setApplicationScene(scene);
-        voice.setFilePath(saved.getFileName().toString());
+        voice.setFilePath(root.relativize(saved).toString().replace('\\', '/'));
         voice.setMimeType(file.getContentType());
         voice.setPublicVisible(publicVisible);
-        voice.setOwnerUsername(username(request));
+        voice.setOwnerUsername(owner);
         voice.setCreatedAt(LocalDateTime.now());
         voices.put(voice.getVoiceId(), voice);
         return ResponseEntity.status(HttpStatus.CREATED).body(voice);

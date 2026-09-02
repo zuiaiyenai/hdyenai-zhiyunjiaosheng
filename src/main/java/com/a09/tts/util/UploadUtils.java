@@ -1,42 +1,17 @@
 package com.a09.tts.util;
 
-import org.springframework.web.multipart.MultipartFile;
-
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Locale;
-import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 public final class UploadUtils {
     private static final Pattern WINDOWS_ABSOLUTE_PATH = Pattern.compile("^[a-zA-Z]:[\\\\/].*");
 
     private UploadUtils() {
-    }
-
-    public static Path save(MultipartFile file, Path directory, Set<String> extensions) throws IOException {
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("上传文件不能为空");
-        }
-        String originalName = file.getOriginalFilename();
-        String safeName = originalName == null ? "upload.bin" : Path.of(originalName).getFileName().toString();
-        String extension = extensionOf(safeName);
-        if (!extensions.isEmpty() && !extensions.contains(extension)) {
-            throw new IllegalArgumentException("不支持的文件类型: " + extension);
-        }
-        Path root = directory.toAbsolutePath().normalize();
-        Files.createDirectories(root);
-        Path target = root.resolve(UUID.randomUUID() + extension).normalize();
-        if (!target.startsWith(root)) {
-            throw new IllegalArgumentException("非法文件名");
-        }
-        Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-        return target;
     }
 
     public static Path resolveWithin(Path directory, String storedPath) {
@@ -58,6 +33,15 @@ public final class UploadUtils {
         Path target = supplied.isAbsolute() ? supplied.normalize() : root.resolve(supplied).normalize();
         if (!target.startsWith(root)) {
             throw new IllegalArgumentException("文件路径超出上传目录");
+        }
+        if (Files.exists(root) && Files.exists(target)) {
+            try {
+                if (!target.toRealPath().startsWith(root.toRealPath())) {
+                    throw new IllegalArgumentException("文件路径超出上传目录");
+                }
+            } catch (IOException exception) {
+                throw new IllegalArgumentException("无法校验文件路径", exception);
+            }
         }
         return target;
     }

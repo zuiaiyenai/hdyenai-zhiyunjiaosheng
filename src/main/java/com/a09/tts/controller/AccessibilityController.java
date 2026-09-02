@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/accessibility")
@@ -31,6 +32,8 @@ public class AccessibilityController {
         try {
             Map<String, Object> result = accessibilityService.readTextFile(file);
             return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("code", 400, "msg", e.getMessage()));
         } catch (Exception e) {
             log.error("文件朗读失败", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -44,10 +47,15 @@ public class AccessibilityController {
     @PostMapping("/voice-note")
     public ResponseEntity<Map<String, Object>> createVoiceNote(
             @RequestParam("audio") MultipartFile audioFile,
-            @RequestParam(value = "title", defaultValue = "未命名笔记") String title) {
+            @RequestParam(value = "title", defaultValue = "未命名笔记") String title,
+            HttpServletRequest request) {
         try {
-            Map<String, Object> result = accessibilityService.saveVoiceNote(audioFile, title);
+            Object username = request.getAttribute("username");
+            Map<String, Object> result = accessibilityService.saveVoiceNote(
+                    audioFile, title, username == null ? "anonymous" : username.toString());
             return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("code", 400, "msg", e.getMessage()));
         } catch (Exception e) {
             log.error("语音笔记保存失败", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -59,9 +67,11 @@ public class AccessibilityController {
      * 获取语音笔记列表
      */
     @GetMapping("/voice-notes")
-    public ResponseEntity<Map<String, Object>> listVoiceNotes() {
+    public ResponseEntity<Map<String, Object>> listVoiceNotes(HttpServletRequest request) {
         try {
-            Map<String, Object> result = accessibilityService.listVoiceNotes();
+            Object username = request.getAttribute("username");
+            Map<String, Object> result = accessibilityService.listVoiceNotes(
+                    username == null ? "anonymous" : username.toString());
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("获取语音笔记列表失败", e);
@@ -94,6 +104,8 @@ public class AccessibilityController {
         try {
             Map<String, Object> result = accessibilityService.readPPTFile(file);
             return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("code", 400, "msg", e.getMessage()));
         } catch (Exception e) {
             log.error("PPT朗读失败", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

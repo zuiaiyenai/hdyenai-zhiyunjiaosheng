@@ -12,8 +12,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.nio.file.Path;
-import java.util.Set;
 import com.a09.tts.util.UploadUtils;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -26,6 +27,9 @@ public class VoiceServiceImpl implements VoiceService {
 
     @Value("${app.upload-dir}")
     private String uploadDir;
+
+    @Autowired
+    private UploadSecurityService uploadSecurity;
 
     public List<Voice> findVoiceByName(String voiceName) {
         return voiceMapper.findVoiceByName(voiceName);
@@ -74,12 +78,12 @@ public class VoiceServiceImpl implements VoiceService {
     })
     public Voice upload(String name, String scene, boolean publicVisible, String owner, MultipartFile file)
             throws Exception {
-        Path saved = UploadUtils.save(file, Path.of(uploadDir),
-                Set.of(".wav", ".mp3", ".m4a", ".flac", ".ogg"));
+        Path root = Path.of(uploadDir).toAbsolutePath().normalize();
+        Path saved = uploadSecurity.save(file, root, Type.AUDIO, owner);
         Voice voice = new Voice();
         voice.setVoiceName(name);
         voice.setApplicationScene(scene);
-        voice.setFilePath(saved.getFileName().toString());
+        voice.setFilePath(root.relativize(saved).toString().replace('\\', '/'));
         voice.setMimeType(file.getContentType());
         voice.setPublicVisible(publicVisible);
         voice.setOwnerUsername(owner);

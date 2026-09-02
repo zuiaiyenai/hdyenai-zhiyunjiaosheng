@@ -5,11 +5,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.a09.tts.pojo.User;
 import com.a09.tts.service.UserService;
+import com.a09.tts.security.LoginRateLimiter;
+import com.a09.tts.security.PasswordPolicy;
 import com.a09.tts.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,6 +32,12 @@ public class UserController {
     @Autowired
     private JwtUtil jwtUtil;
 
+    @Autowired
+    private PasswordPolicy passwordPolicy;
+
+    @Autowired
+    private LoginRateLimiter loginRateLimiter;
+
     @PostMapping("/register")
     public ResponseEntity<Map<String, Object>> registerUser(@RequestBody User user) {
         Map<String, Object> result = new HashMap<>();
@@ -40,13 +49,14 @@ public class UserController {
                 result.put("msg", "用户名或密码不能为空！");
                 return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
             }
+            passwordPolicy.validate(password);
             Boolean usernameExist = userService.isUsernameExist(username);
             if (usernameExist) {
                 result.put("code", 400);
                 result.put("msg", "用户名已存在！");
                 return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
             }
-            User user1 = new User(username, password, user.getPermission());
+            User user1 = new User(username, password, false);
             int insertResult = userService.register(user1);
             if (insertResult == 1) {
                 result.put("code", 201);
@@ -57,16 +67,20 @@ public class UserController {
                 result.put("msg", "用户注册失败。");
                 return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
             }
+        } catch (IllegalArgumentException e) {
+            result.put("code", 400);
+            result.put("msg", e.getMessage());
+            return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
         } catch (Exception e) {
             log.error("注册操作有误", e);
             result.put("code", 500);
-            result.put("msg", "注册操作有误：" + e.getMessage());
+            result.put("msg", "注册服务暂不可用");
             return new ResponseEntity<>(result, HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Map<String, Object>> loginUser(@RequestBody User user) {
+    public ResponseEntity<Map<String, Object>> loginUser(@RequestBody User user, HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
         try {
             String username = user.getUsername();
@@ -76,14 +90,15 @@ public class UserController {
                 result.put("msg", "用户名或密码不能为空！");
                 return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
             }
-            Boolean usernameExist = userService.isUsernameExist(username);
-            if (!usernameExist) {
-                result.put("code", 400);
-                result.put("msg", "用户名不存在！");
-                return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
+            String ip = request.getRemoteAddr();
+            if (loginRateLimiter.isBlocked(ip, username)) {
+                result.put("code", 429);
+                result.put("msg", "登录失败次数过多，请稍后再试");
+                return new ResponseEntity<>(result, HttpStatus.TOO_MANY_REQUESTS);
             }
             Boolean loginSuccess = userService.login(username, password);
             if (loginSuccess) {
+                loginRateLimiter.recordSuccess(ip, username);
                 String token = jwtUtil.generateToken(username);
                 result.put("code", 200);
                 result.put("msg", "登陆成功！");
@@ -91,14 +106,15 @@ public class UserController {
                 result.put("username", username);
                 return new ResponseEntity<>(result, HttpStatus.OK);
             } else {
+                loginRateLimiter.recordFailure(ip, username);
                 result.put("code", 401);
-                result.put("msg", "密码有误，登陆失败。");
+                result.put("msg", "用户名或密码错误");
                 return new ResponseEntity<>(result, HttpStatus.UNAUTHORIZED);
             }
         } catch (Exception e) {
             log.error("登陆操作有误", e);
             result.put("code", 500);
-            result.put("msg", "登陆操作有误：" + e.getMessage());
+            result.put("msg", "登录服务暂不可用");
             return new ResponseEntity<>(result, HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }

@@ -1,10 +1,13 @@
 package com.a09.tts.service;
 
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
 import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFSlide;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -40,6 +43,7 @@ public class CoursewareProjectService {
     private final Map<String, ProjectState> projects = new ConcurrentHashMap<>();
     private final PPTService pptService;
     private final TTSService ttsService;
+    private final UploadSecurityService uploadSecurity;
 
     @Value("${app.courseware-dir:./uploads/courseware}")
     private String coursewareDir;
@@ -50,16 +54,29 @@ public class CoursewareProjectService {
     @Value("${app.ffprobe-path:ffprobe}")
     private String ffprobePath;
 
-    public CoursewareProjectService(PPTService pptService, TTSService ttsService) {
+    @Autowired
+    public CoursewareProjectService(PPTService pptService, TTSService ttsService,
+                                    UploadSecurityService uploadSecurity) {
         this.pptService = pptService;
         this.ttsService = ttsService;
+        this.uploadSecurity = uploadSecurity;
+    }
+
+    public CoursewareProjectService(PPTService pptService, TTSService ttsService) {
+        this(pptService, ttsService, new UploadSecurityService());
     }
 
     public ProjectView create(MultipartFile file, String owner) throws IOException {
+        uploadSecurity.validate(file, Type.PRESENTATION);
         String fileName = validatePpt(file);
         String extension = fileName.toLowerCase(Locale.ROOT).endsWith(".pptx") ? ".pptx" : ".ppt";
         String id = UUID.randomUUID().toString();
-        Path directory = projectRoot().resolve(id);
+        Path ownerDirectory = uploadSecurity.ownerDirectory(projectRoot(), owner);
+        uploadSecurity.ensureQuota(ownerDirectory, file.getSize());
+        Path directory = ownerDirectory.resolve(id).normalize();
+        if (!directory.startsWith(ownerDirectory)) {
+            throw new IllegalArgumentException("非法课件项目路径");
+        }
         Files.createDirectories(directory);
         Path source = directory.resolve("source" + extension);
         Files.copy(file.getInputStream(), source, StandardCopyOption.REPLACE_EXISTING);
@@ -143,20 +160,10 @@ public class CoursewareProjectService {
     }
 
     public ProjectView uploadAvatar(String id, String owner, MultipartFile avatar) throws IOException {
-        if (avatar == null || avatar.isEmpty()) {
-            throw new IllegalArgumentException("请选择虚拟教师图片");
-        }
-        String contentType = avatar.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
-            throw new IllegalArgumentException("虚拟教师仅支持图片文件");
-        }
-        try (InputStream input = avatar.getInputStream()) {
-            if (ImageIO.read(input) == null) {
-                throw new IllegalArgumentException("无法识别虚拟教师图片");
-            }
-        }
+        uploadSecurity.validate(avatar, Type.IMAGE);
         ProjectState state = requireProject(id, owner);
         synchronized (state) {
+            uploadSecurity.ensureQuota(state.directory.getParent(), avatar.getSize());
             Path avatarPath = state.directory.resolve("virtual-teacher.png");
             try (InputStream input = avatar.getInputStream()) {
                 BufferedImage image = ImageIO.read(input);

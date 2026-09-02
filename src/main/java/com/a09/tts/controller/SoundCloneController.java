@@ -2,7 +2,9 @@ package com.a09.tts.controller;
 
 import com.a09.tts.service.SoundCloneService;
 import com.a09.tts.service.AliyunSpeechService;
-import com.a09.tts.util.UploadUtils;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,7 +23,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
@@ -29,7 +30,6 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.Socket;
 import java.util.Map;
-import java.util.Set;
 
 @RestController
 @RequestMapping("/sound_clone")
@@ -44,11 +44,14 @@ public class SoundCloneController {
 
     private final SoundCloneService soundCloneService;
     private final AliyunSpeechService aliyunSpeechService;
+    private final UploadSecurityService uploadSecurity;
 
     public SoundCloneController(SoundCloneService soundCloneService,
-                                AliyunSpeechService aliyunSpeechService) {
+                                AliyunSpeechService aliyunSpeechService,
+                                UploadSecurityService uploadSecurity) {
         this.soundCloneService = soundCloneService;
         this.aliyunSpeechService = aliyunSpeechService;
+        this.uploadSecurity = uploadSecurity;
     }
 
     @GetMapping("/capabilities")
@@ -103,7 +106,8 @@ public class SoundCloneController {
             @RequestParam("prompt_lang") String promptLang,
             @RequestParam("text") String text,
             @RequestParam("text_lang") String textLang,
-            @RequestParam("audioFile") MultipartFile audioFile) {
+            @RequestParam("audioFile") MultipartFile audioFile,
+            HttpServletRequest request) {
         Path audioFilePath = null;
         try {
             if (audioFile.isEmpty()) {
@@ -113,9 +117,8 @@ public class SoundCloneController {
                 return textResponse(HttpStatus.BAD_REQUEST, "合成文本不能为空！");
             }
 
-            Path dirPath = Paths.get(uploadDir);
-            audioFilePath = UploadUtils.save(audioFile, dirPath,
-                    Set.of(".wav", ".mp3", ".m4a", ".flac", ".ogg"));
+            audioFilePath = uploadSecurity.save(audioFile, Paths.get(uploadDir), Type.AUDIO,
+                    username(request));
             Path savedAudioPath = audioFilePath;
             ResponseEntity<StreamingResponseBody> response = soundCloneService.soundClone(
                     promptText, promptLang, text, textLang, savedAudioPath.toString());
@@ -133,11 +136,19 @@ public class SoundCloneController {
                 }
             };
             return new ResponseEntity<>(cleaningBody, response.getHeaders(), response.getStatusCode());
+        } catch (IllegalArgumentException exception) {
+            deleteQuietly(audioFilePath);
+            return textResponse(HttpStatus.BAD_REQUEST, exception.getMessage());
         } catch (Exception exception) {
             deleteQuietly(audioFilePath);
             log.error("声音克隆请求失败", exception);
             return textResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Upload failed");
         }
+    }
+
+    private static String username(HttpServletRequest request) {
+        Object value = request.getAttribute("username");
+        return value == null ? "anonymous" : value.toString();
     }
 
     private static ResponseEntity<StreamingResponseBody> textResponse(HttpStatus status, String message) {
@@ -146,12 +157,12 @@ public class SoundCloneController {
         return ResponseEntity.status(status).contentType(MediaType.TEXT_PLAIN).body(body);
     }
 
-    private static void deleteQuietly(Path path) {
+    private void deleteQuietly(Path path) {
         if (path == null) {
             return;
         }
         try {
-            Files.deleteIfExists(path);
+            uploadSecurity.delete(Paths.get(uploadDir), path);
         } catch (Exception exception) {
             log.warn("无法删除声音克隆临时文件：{}", path, exception);
         }

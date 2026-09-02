@@ -7,7 +7,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
 import java.util.zip.ZipFile;
 
@@ -44,7 +46,7 @@ class CoursewareProjectServiceTest {
 
         MockMultipartFile ppt = new MockMultipartFile("file", "人工智能导论.pptx",
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                new byte[]{1, 2, 3});
+                pptx());
 
         ProjectView created = service.create(ppt, "alice");
         assertEquals("人工智能导论", created.title());
@@ -81,10 +83,19 @@ class CoursewareProjectServiceTest {
 
         MockMultipartFile ppt = new MockMultipartFile("file", "失败示例.pptx",
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                new byte[]{1});
+                pptx());
 
         IllegalStateException exception = assertThrows(IllegalStateException.class,
                 () -> service.create(ppt, "alice"));
         assertTrue(exception.getMessage().contains("AI 服务暂时繁忙"));
+    }
+
+    private byte[] pptx() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (XMLSlideShow show = new XMLSlideShow()) {
+            show.createSlide();
+            show.write(output);
+        }
+        return output.toByteArray();
     }
 }

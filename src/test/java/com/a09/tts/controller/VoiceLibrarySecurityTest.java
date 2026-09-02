@@ -5,6 +5,7 @@ import com.a09.tts.pojo.Voice;
 import com.a09.tts.service.VoiceService;
 import com.a09.tts.service.impl.VoiceServiceImpl;
 import com.a09.tts.util.UploadUtils;
+import com.a09.tts.TestMediaFiles;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpStatus;
@@ -34,7 +35,7 @@ class VoiceLibrarySecurityTest {
     void noDbUploadPreviewAndDeleteUseServerGeneratedStorageKey() throws Exception {
         VoiceNoDbController controller = new VoiceNoDbController(uploadRoot.toString());
         MockHttpServletRequest owner = requestFor("alice");
-        byte[] content = new byte[]{1, 2, 3, 4};
+        byte[] content = TestMediaFiles.wav();
 
         ResponseEntity<Voice> uploaded = controller.upload(
                 "测试声音", "测试", false,
@@ -44,7 +45,7 @@ class VoiceLibrarySecurityTest {
         assertEquals(HttpStatus.CREATED, uploaded.getStatusCode());
         assertTrue(voice != null);
         assertFalse(Path.of(voice.getFilePath()).isAbsolute());
-        assertEquals(Path.of(voice.getFilePath()).getFileName().toString(), voice.getFilePath());
+        assertFalse(voice.getFilePath().contains(".."));
         assertArrayEquals(content, controller.preview(voice.getVoiceId(), owner).getBody());
 
         MockHttpServletRequest otherUser = requestFor("bob");

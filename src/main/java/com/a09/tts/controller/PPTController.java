@@ -5,6 +5,8 @@ package com.a09.tts.controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.a09.tts.service.PPTService;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -31,12 +33,18 @@ public class PPTController {
     @Autowired
     private PPTService pptService;
 
+    @Autowired
+    private UploadSecurityService uploadSecurity;
+
     @PostMapping("/summary")
     public ResponseEntity<String> summary(@RequestParam("file") MultipartFile file) {
 
         try {
+            uploadSecurity.validate(file, Type.PRESENTATION);
             String result = pptService.processPptAndGenerateContent(file);
             return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }

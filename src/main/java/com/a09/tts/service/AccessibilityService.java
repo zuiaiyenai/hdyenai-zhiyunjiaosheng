@@ -8,9 +8,9 @@ public interface AccessibilityService {
 
     Map<String, Object> readTextFile(MultipartFile file) throws Exception;
 
-    Map<String, Object> saveVoiceNote(MultipartFile audioFile, String title) throws Exception;
+    Map<String, Object> saveVoiceNote(MultipartFile audioFile, String title, String owner) throws Exception;
 
-    Map<String, Object> listVoiceNotes() throws Exception;
+    Map<String, Object> listVoiceNotes(String owner) throws Exception;
 
     Map<String, Object> generateStudySummary(String textContent);
 

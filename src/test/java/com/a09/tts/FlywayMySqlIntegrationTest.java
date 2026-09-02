@@ -60,7 +60,7 @@ class FlywayMySqlIntegrationTest {
                 VoiceService voiceService = first.getBean(VoiceService.class);
                 Voice voice = voiceService.upload(
                         "Phase 2 voice", "integration", false, "phase2_user",
-                        new MockMultipartFile("file", "voice.wav", "audio/wav", new byte[]{1, 2, 3}));
+                        new MockMultipartFile("file", "voice.wav", "audio/wav", TestMediaFiles.wav()));
                 assertNotNull(voice.getVoiceId());
                 assertFalse(Path.of(voice.getFilePath()).isAbsolute());
                 voiceId = voice.getVoiceId();

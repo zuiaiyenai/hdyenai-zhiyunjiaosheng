@@ -32,7 +32,7 @@ public class UserServiceImpl implements UserService {
      * 用户注册的服务方法。
      *
      * 该方法接收一个 User 对象作为参数，将用户信息传递给 UserMapper 的 register方法进行注册操作。
-     * 将用户的密码进行sha256加密。
+     * 使用 BCrypt 对新用户密码进行单向哈希。
      * 并将注册结果作为返回值，通常返回插入记录的行数，如果插入成功则为 1(true)，失败为 0(false)。
      *
      * @param user 要注册的用户对象，包含用户名、密码和邮箱等信息。

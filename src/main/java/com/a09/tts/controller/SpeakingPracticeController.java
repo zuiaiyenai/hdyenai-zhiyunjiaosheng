@@ -3,6 +3,8 @@ package com.a09.tts.controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.a09.tts.service.SpeakingPracticeService;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,7 +15,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.Map;
 
 @RestController
@@ -26,9 +27,12 @@ public class SpeakingPracticeController {
     private String speakingDir;
 
     private final SpeakingPracticeService speakingPracticeService;
+    private final UploadSecurityService uploadSecurity;
 
-    public SpeakingPracticeController(SpeakingPracticeService speakingPracticeService) {
+    public SpeakingPracticeController(SpeakingPracticeService speakingPracticeService,
+                                      UploadSecurityService uploadSecurity) {
         this.speakingPracticeService = speakingPracticeService;
+        this.uploadSecurity = uploadSecurity;
     }
 
     @GetMapping("/example")
@@ -56,12 +60,16 @@ public class SpeakingPracticeController {
                 return ResponseEntity.badRequest().body("音频文件为空！");
             }
             log.info("评测请求 - 语言: {} | 模式: {} | 会话: {}", language, mode, sessionId);
-            Path audioFilePath = saveFile(file);
-            ResponseEntity<?> response = speakingPracticeService.evaluate(
-                    audioFilePath.toString(), text, mode, sessionId, language, currentUsername(request)
-            );
-            audioFilePath.toFile().deleteOnExit();
-            return response;
+            Path audioFilePath = uploadSecurity.save(file, Paths.get(speakingDir), Type.AUDIO,
+                    currentUsername(request));
+            try {
+                return speakingPracticeService.evaluate(
+                        audioFilePath.toString(), text, mode, sessionId, language, currentUsername(request));
+            } finally {
+                uploadSecurity.delete(Paths.get(speakingDir), audioFilePath);
+            }
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
         } catch (Exception e) {
             log.error("口语评测失败", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -136,13 +144,4 @@ public class SpeakingPracticeController {
         return username == null ? "anonymous" : username.toString();
     }
 
-    private Path saveFile(MultipartFile file) throws Exception {
-        Path dirPath = Paths.get(speakingDir);
-        Files.createDirectories(dirPath);
-        String audioFileName = System.currentTimeMillis() + "_" + file.getOriginalFilename();
-        Path audioFilePath = dirPath.resolve(audioFileName);
-        Files.copy(file.getInputStream(), audioFilePath, StandardCopyOption.REPLACE_EXISTING);
-        log.info("存储音频文件: {}", audioFilePath);
-        return audioFilePath;
-    }
 }

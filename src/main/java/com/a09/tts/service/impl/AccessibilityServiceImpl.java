@@ -3,6 +3,8 @@ package com.a09.tts.service.impl;
 import com.a09.tts.service.ASRService;
 import com.a09.tts.service.AccessibilityService;
 import com.a09.tts.service.MoonshotChatClient;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
 import org.apache.poi.hslf.usermodel.HSLFShape;
 import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
@@ -38,15 +40,24 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     private ASRService asrService;
 
     private final MoonshotChatClient moonshotChatClient;
+    private final UploadSecurityService uploadSecurity;
+
+    @Autowired
+    public AccessibilityServiceImpl(MoonshotChatClient moonshotChatClient,
+                                    UploadSecurityService uploadSecurity) {
+        this.moonshotChatClient = moonshotChatClient;
+        this.uploadSecurity = uploadSecurity;
+    }
 
     public AccessibilityServiceImpl(MoonshotChatClient moonshotChatClient) {
-        this.moonshotChatClient = moonshotChatClient;
+        this(moonshotChatClient, new UploadSecurityService());
     }
 
     /**
      * 朗读上传的文本文件内容（TTS合成）
      */
     public Map<String, Object> readTextFile(MultipartFile file) throws Exception {
+        uploadSecurity.validate(file, Type.TEXT);
         Map<String, Object> result = new HashMap<>();
         String content = new String(file.getBytes(), StandardCharsets.UTF_8);
         result.put("text", content);
@@ -60,15 +71,12 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     /**
      * 语音笔记：使用ASR真实转写语音为文字并保存笔记
      */
-    public Map<String, Object> saveVoiceNote(MultipartFile audioFile, String title) throws Exception {
+    public Map<String, Object> saveVoiceNote(MultipartFile audioFile, String title, String owner) throws Exception {
         Map<String, Object> result = new HashMap<>();
         Path notesDir = Paths.get(accessibilityDir, "notes");
-        Files.createDirectories(notesDir);
+        Path audioPath = uploadSecurity.save(audioFile, notesDir, Type.AUDIO, owner);
 
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-        String audioFileName = timestamp + "_" + audioFile.getOriginalFilename();
-        Path audioPath = notesDir.resolve(audioFileName);
-        Files.copy(audioFile.getInputStream(), audioPath);
 
         // 调用ASR进行真实的语音转文字
         String transcribedText = "";
@@ -89,14 +97,17 @@ public class AccessibilityServiceImpl implements AccessibilityService {
 
         // 保存笔记文本
         String noteFileName = timestamp + "_note.txt";
-        Path notePath = notesDir.resolve(noteFileName);
+        Path notePath = audioPath.getParent().resolve(noteFileName).normalize();
+        if (!notePath.startsWith(audioPath.getParent())) {
+            throw new IllegalArgumentException("非法笔记路径");
+        }
         Files.writeString(notePath, transcribedText, StandardCharsets.UTF_8);
 
         result.put("noteId", timestamp);
         result.put("title", title);
         result.put("transcribedText", transcribedText);
-        result.put("audioFilePath", audioPath.toString());
-        result.put("noteFilePath", notePath.toString());
+        result.put("audioFilePath", audioPath.getFileName().toString());
+        result.put("noteFilePath", notePath.getFileName().toString());
         result.put("message", "语音笔记保存成功");
         log.info("语音笔记已保存: {}", noteFileName);
         return result;
@@ -105,7 +116,7 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     /**
      * 获取所有语音笔记列表
      */
-    public Map<String, Object> listVoiceNotes() throws Exception {
+    public Map<String, Object> listVoiceNotes(String owner) throws Exception {
         Map<String, Object> result = new HashMap<>();
         Path notesDir = Paths.get(accessibilityDir, "notes");
         if (!Files.exists(notesDir)) {
@@ -113,9 +124,10 @@ public class AccessibilityServiceImpl implements AccessibilityService {
             result.put("message", "暂无语音笔记");
             return result;
         }
+        Path ownerNotesDir = uploadSecurity.ownerDirectory(notesDir, owner);
 
         List<Map<String, String>> notesList = new ArrayList<>();
-        try (var stream = Files.list(notesDir)) {
+        try (var stream = Files.list(ownerNotesDir)) {
             stream.filter(p -> p.toString().endsWith(".txt"))
                     .sorted((a, b) -> b.getFileName().toString().compareTo(a.getFileName().toString()))
                     .forEach(p -> {
@@ -224,6 +236,7 @@ public class AccessibilityServiceImpl implements AccessibilityService {
      * 朗读PPT文件（解析PPT内容并返回文本）
      */
     public Map<String, Object> readPPTFile(MultipartFile file) throws Exception {
+        uploadSecurity.validate(file, Type.PRESENTATION);
         Map<String, Object> result = new HashMap<>();
         String fileName = file.getOriginalFilename();
         String content;
