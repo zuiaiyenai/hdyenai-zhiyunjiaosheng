@@ -51,15 +51,28 @@ config/application-local.yml.example
 config/application-local.yml
 ```
 
-至少填写：
+可以直接使用环境变量配置数据库和 JWT：
 
-```properties
-spring.datasource.username=你的MySQL用户名
-spring.datasource.password=你的MySQL密码
-jwt.secret=至少32位的随机字符串
+```powershell
+$env:DB_HOST='127.0.0.1'
+$env:DB_PORT='3306'
+$env:DB_NAME='zhiyunjiaos'
+$env:DB_USERNAME='你的MySQL用户名'
+$env:DB_PASSWORD='你的MySQL密码'
+$env:JWT_SECRET='至少32位的随机字符串'
+.\launch.ps1 -Mode db
 ```
 
 该本地配置已被 `.gitignore` 忽略，不会提交密码或密钥。
+也可以在本地配置文件中填写同名 Spring 配置。
+
+Flyway 会在第一次连接全新空库时自动执行
+`src/main/resources/db/migration` 下的迁移，创建项目所需表结构；后续启动只校验并执行新增版本。
+不会自动创建管理员或其他默认用户，首次使用请通过注册接口创建账号。
+
+已有表但没有 `flyway_schema_history` 的旧数据库默认会拒绝自动迁移。请先备份并确认其结构与
+`V1__init_schema.sql` 一致，再仅为首次受控启动设置
+`FLYWAY_BASELINE_ON_MIGRATE=true`；成功生成历史记录后立即取消该变量。
 
 启动数据库模式：
 
@@ -67,16 +80,10 @@ jwt.secret=至少32位的随机字符串
 .\launch.ps1 -Mode db
 ```
 
-默认账号：`admin / 123456`
-
-### 本地功能测试约定
-
-后续进行数据库模式下的登录、接口联调和页面验收时，默认使用测试账号
-`admin / 123456`。仅在明确测试免数据库模式时，才使用下方演示账号。
-
 ## 免数据库模式
 
-未创建本地配置时会自动进入该模式，也可强制启动：
+未创建本地配置时会自动进入该模式。直接从 IDEA 启动且未指定 Profile 时也默认使用
+`nodb`，也可强制启动：
 
 ```powershell
 .\launch.ps1 -Mode nodb

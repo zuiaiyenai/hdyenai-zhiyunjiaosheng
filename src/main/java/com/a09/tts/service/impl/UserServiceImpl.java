@@ -39,6 +39,9 @@ public class UserServiceImpl implements UserService {
      * @return 注册操作影响的行数，成功为 1，失败为 0。
      */
     public int register(User user) {
+        if (user.getPermission() == null) {
+            user.setPermission(false);
+        }
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         return userMapper.register(user);
     }

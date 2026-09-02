@@ -3,12 +3,12 @@
 
 spring:
   datasource:
-    url: "jdbc:mysql://127.0.0.1:3306/zhiyunjiaos?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
-    username: root
-    password: "YOUR_MYSQL_PASSWORD"
+    url: "${DB_URL:jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:zhiyunjiaos}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}"
+    username: "${DB_USERNAME:root}"
+    password: "${DB_PASSWORD:}"
 
 jwt:
-  secret: "REPLACE_WITH_A_RANDOM_SECRET_AT_LEAST_32_CHARS"
+  secret: "${JWT_SECRET:REPLACE_WITH_A_RANDOM_SECRET_AT_LEAST_32_CHARS}"
 
 security:
   auth:
