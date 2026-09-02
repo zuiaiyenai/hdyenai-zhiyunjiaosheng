@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.service.VoiceService;
+import com.a09.tts.util.UploadUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +33,9 @@ public class VoiceController {
     @Autowired
     private VoiceService voiceService;
 
+    @org.springframework.beans.factory.annotation.Value("${app.upload-dir}")
+    private String uploadDir;
+
     @GetMapping("/list")
     public ResponseEntity<List<Voice>> listAllVoices(HttpServletRequest request) {
         List<Voice> voices = voiceService.findVisibleVoices(username(request));
@@ -46,30 +50,9 @@ public class VoiceController {
     }
 
     @PostMapping("/add")
-    public ResponseEntity<Map<String, Object>> addVoice(
-            @RequestBody Voice voice, HttpServletRequest request) {
-        Map<String, Object> result = new HashMap<>();
-        try {
-            voice.setOwnerUsername(username(request));
-            if (voice.getPublicVisible() == null) {
-                voice.setPublicVisible(false);
-            }
-            int res = voiceService.addVoiceSample(voice);
-            if (res == 1) {
-                result.put("code", 200);
-                result.put("msg", "声音样本添加成功");
-                return ResponseEntity.ok(result);
-            } else {
-                result.put("code", 400);
-                result.put("msg", "声音样本添加失败");
-                return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
-            }
-        } catch (Exception e) {
-            log.error("添加声音样本失败", e);
-            result.put("code", 500);
-            result.put("msg", e.getMessage());
-            return new ResponseEntity<>(result, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+    public ResponseEntity<Map<String, Object>> addVoice() {
+        return ResponseEntity.status(HttpStatus.GONE)
+                .body(Map.of("code", 410, "msg", "该接口已停用，请使用 /voice_library/upload 上传声音文件"));
     }
 
     @PutMapping("/update")
@@ -157,13 +140,24 @@ public class VoiceController {
         if (!Boolean.TRUE.equals(voice.getPublicVisible()) && !username.equals(voice.getOwnerUsername())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        Path path = Path.of(voice.getFilePath());
+        Path path;
+        byte[] audio;
+        try {
+            path = UploadUtils.resolveWithin(Path.of(uploadDir), voice.getFilePath());
+            if (!Files.isRegularFile(path)) {
+                return ResponseEntity.notFound().build();
+            }
+            audio = Files.readAllBytes(path);
+        } catch (IllegalArgumentException exception) {
+            log.warn("拒绝读取上传目录外的声音文件，voiceId={}", voiceId);
+            return ResponseEntity.notFound().build();
+        }
         return ResponseEntity.ok()
                 .contentType(voice.getMimeType() == null ? MediaType.APPLICATION_OCTET_STREAM
                         : MediaType.parseMediaType(voice.getMimeType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.inline().filename(path.getFileName().toString()).build().toString())
-                .body(Files.readAllBytes(path));
+                .body(audio);
     }
 
     private boolean canManage(Voice voice, HttpServletRequest request) {

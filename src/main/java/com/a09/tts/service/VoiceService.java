@@ -7,8 +7,6 @@ import java.util.List;
 
 public interface VoiceService {
 
-    int addVoiceSample(Voice voice);
-
     List<Voice> findVoiceByName(String voiceName);
 
     List<Voice> findVisibleVoiceByName(String voiceName, String username);

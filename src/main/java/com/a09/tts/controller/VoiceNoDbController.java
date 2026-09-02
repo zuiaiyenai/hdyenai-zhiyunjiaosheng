@@ -82,7 +82,7 @@ public class VoiceNoDbController {
         voice.setVoiceId(sequence.incrementAndGet());
         voice.setVoiceName(name.trim());
         voice.setApplicationScene(scene);
-        voice.setFilePath(saved.toString());
+        voice.setFilePath(saved.getFileName().toString());
         voice.setMimeType(file.getContentType());
         voice.setPublicVisible(publicVisible);
         voice.setOwnerUsername(username(request));
@@ -121,7 +121,7 @@ public class VoiceNoDbController {
         }
         voices.remove(voiceId);
         if (voice.getFilePath() != null) {
-            Files.deleteIfExists(Path.of(voice.getFilePath()));
+            UploadUtils.deleteWithin(Path.of(uploadDir), voice.getFilePath());
         }
         return ResponseEntity.ok(Map.of("code", 200, "msg", "音色已删除"));
     }
@@ -129,21 +129,31 @@ public class VoiceNoDbController {
     @GetMapping("/{voiceId}/audio")
     public ResponseEntity<byte[]> preview(@PathVariable int voiceId, HttpServletRequest request) throws Exception {
         Voice voice = voices.get(voiceId);
-        if (voice == null || voice.getFilePath() == null || !Files.exists(Path.of(voice.getFilePath()))) {
+        if (voice == null || voice.getFilePath() == null) {
             return ResponseEntity.notFound().build();
         }
         if (!Boolean.TRUE.equals(voice.getPublicVisible())
                 && !username(request).equals(voice.getOwnerUsername())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        Path path = Path.of(voice.getFilePath());
+        Path path;
+        byte[] audio;
+        try {
+            path = UploadUtils.resolveWithin(Path.of(uploadDir), voice.getFilePath());
+            if (!Files.isRegularFile(path)) {
+                return ResponseEntity.notFound().build();
+            }
+            audio = Files.readAllBytes(path);
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.notFound().build();
+        }
         MediaType contentType = voice.getMimeType() == null
                 ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(voice.getMimeType());
         return ResponseEntity.ok()
                 .contentType(contentType)
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.inline().filename(path.getFileName().toString()).build().toString())
-                .body(Files.readAllBytes(path));
+                .body(audio);
     }
 
     private void addDefault(String name, String scene) {

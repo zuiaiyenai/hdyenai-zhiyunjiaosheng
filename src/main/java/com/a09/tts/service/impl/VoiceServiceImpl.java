@@ -11,7 +11,6 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 import com.a09.tts.util.UploadUtils;
@@ -27,14 +26,6 @@ public class VoiceServiceImpl implements VoiceService {
 
     @Value("${app.upload-dir}")
     private String uploadDir;
-
-    @Caching(evict = {
-            @CacheEvict(value = "voiceList", allEntries = true),
-            @CacheEvict(value = "voiceById", allEntries = true)
-    })
-    public int addVoiceSample(Voice voice) {
-        return voiceMapper.addVoiceSample(voice);
-    }
 
     public List<Voice> findVoiceByName(String voiceName) {
         return voiceMapper.findVoiceByName(voiceName);
@@ -62,7 +53,7 @@ public class VoiceServiceImpl implements VoiceService {
         Voice voice = voiceMapper.findVoiceById(voiceId);
         if (voice != null && voice.getFilePath() != null) {
             try {
-                Files.deleteIfExists(Path.of(voice.getFilePath()));
+                UploadUtils.deleteWithin(Path.of(uploadDir), voice.getFilePath());
             } catch (Exception ignored) {
             }
         }
@@ -88,7 +79,7 @@ public class VoiceServiceImpl implements VoiceService {
         Voice voice = new Voice();
         voice.setVoiceName(name);
         voice.setApplicationScene(scene);
-        voice.setFilePath(saved.toString());
+        voice.setFilePath(saved.getFileName().toString());
         voice.setMimeType(file.getContentType());
         voice.setPublicVisible(publicVisible);
         voice.setOwnerUsername(owner);
@@ -96,7 +87,7 @@ public class VoiceServiceImpl implements VoiceService {
             voiceMapper.addVoiceSample(voice);
             return voice;
         } catch (Exception exception) {
-            Files.deleteIfExists(saved);
+            UploadUtils.deleteWithin(Path.of(uploadDir), saved.toString());
             throw exception;
         }
     }
