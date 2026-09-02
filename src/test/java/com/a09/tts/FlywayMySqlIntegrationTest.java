@@ -48,7 +48,7 @@ class FlywayMySqlIntegrationTest {
                                 + "WHERE table_schema = DATABASE() "
                                 + "AND table_name IN ('user', 'voice', 'speaking_history')",
                         Integer.class));
-                assertEquals(1, jdbc.queryForObject(
+                assertEquals(3, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
 
                 UserService userService = first.getBean(UserService.class);
@@ -86,7 +86,7 @@ class FlywayMySqlIntegrationTest {
                 assertEquals(1, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM speaking_history WHERE session_id = 'phase2-session'",
                         Integer.class));
-                assertEquals(1, jdbc.queryForObject(
+                assertEquals(3, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
             }
         } finally {

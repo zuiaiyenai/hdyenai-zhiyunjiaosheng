@@ -1,5 +1,6 @@
 package com.a09.tts.service;
 
+import com.a09.tts.media.ExternalProcessRunner;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.security.UploadSecurityService.Type;
 import com.a09.tts.repository.CoursewareProjectRepository;
@@ -31,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -50,6 +52,7 @@ public class CoursewareProjectService {
     private final TTSService ttsService;
     private final UploadSecurityService uploadSecurity;
     private final CoursewareProjectRepository projectRepository;
+    private final ExternalProcessRunner processRunner;
 
     @Value("${app.courseware-dir:./uploads/courseware}")
     private String coursewareDir;
@@ -63,11 +66,20 @@ public class CoursewareProjectService {
     @Autowired
     public CoursewareProjectService(PPTService pptService, TTSService ttsService,
                                     UploadSecurityService uploadSecurity,
-                                    CoursewareProjectRepository projectRepository) {
+                                    CoursewareProjectRepository projectRepository,
+                                    ExternalProcessRunner processRunner) {
         this.pptService = pptService;
         this.ttsService = ttsService;
         this.uploadSecurity = uploadSecurity;
         this.projectRepository = projectRepository;
+        this.processRunner = processRunner;
+    }
+
+    public CoursewareProjectService(PPTService pptService, TTSService ttsService,
+                                    UploadSecurityService uploadSecurity,
+                                    CoursewareProjectRepository projectRepository) {
+        this(pptService, ttsService, uploadSecurity, projectRepository,
+                new ExternalProcessRunner(Duration.ofMinutes(10)));
     }
 
     public CoursewareProjectService(PPTService pptService, TTSService ttsService,
@@ -376,19 +388,7 @@ public class CoursewareProjectService {
     }
 
     private String run(List<String> command, String message) throws IOException {
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        try {
-            if (process.waitFor() != 0) {
-                String detail = output.lines().filter(line -> !line.isBlank())
-                        .reduce((first, second) -> second).orElse("未知错误");
-                throw new IOException(message + "：" + detail);
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IOException(message + "：处理被中断", exception);
-        }
-        return output;
+        return processRunner.run(command, message).output();
     }
 
     private Path buildPackage(ProjectState state) throws IOException {
@@ -535,9 +535,10 @@ public class CoursewareProjectService {
 
     private void fail(ProjectState state, Exception exception) {
         state.status = "FAILED";
-        String message = exception.getMessage();
+        String message = exception instanceof IOException
+                ? "课件处理失败" : exception.getMessage();
         if (message == null || message.isBlank()) {
-            message = exception.getClass().getSimpleName();
+            message = "课件处理失败";
         }
         state.errorMessage = message.length() > 1000 ? message.substring(0, 1000) : message;
         state.updatedAt = Instant.now();

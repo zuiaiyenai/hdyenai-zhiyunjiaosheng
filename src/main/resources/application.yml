@@ -37,6 +37,14 @@ server:
   port: "${SERVER_PORT:8081}"
 
 app:
+  tasks:
+    core-pool-size: "${TASK_CORE_POOL_SIZE:2}"
+    max-pool-size: "${TASK_MAX_POOL_SIZE:4}"
+    queue-capacity: "${TASK_QUEUE_CAPACITY:20}"
+    timeout: "${TASK_TIMEOUT:15m}"
+    per-user-concurrency: "${TASK_PER_USER_CONCURRENCY:2}"
+  media:
+    process-timeout: "${MEDIA_PROCESS_TIMEOUT:10m}"
   cors:
     allowed-origins: "${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}"
   security:

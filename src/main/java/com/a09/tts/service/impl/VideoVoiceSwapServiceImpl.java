@@ -1,5 +1,6 @@
 package com.a09.tts.service.impl;
 
+import com.a09.tts.media.ExternalProcessRunner;
 import com.a09.tts.api.AsrResult;
 import com.a09.tts.api.VideoSubtitlePreview;
 import com.a09.tts.service.ASRService;
@@ -8,6 +9,7 @@ import com.a09.tts.service.VideoVoiceSwapService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +22,7 @@ import java.util.UUID;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 
 @Service
 public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
@@ -40,10 +43,18 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
 
     private final ASRService asrService;
     private final TTSService ttsService;
+    private final ExternalProcessRunner processRunner;
 
-    public VideoVoiceSwapServiceImpl(ASRService asrService, TTSService ttsService) {
+    @Autowired
+    public VideoVoiceSwapServiceImpl(ASRService asrService, TTSService ttsService,
+                                     ExternalProcessRunner processRunner) {
         this.asrService = asrService;
         this.ttsService = ttsService;
+        this.processRunner = processRunner;
+    }
+
+    public VideoVoiceSwapServiceImpl(ASRService asrService, TTSService ttsService) {
+        this(asrService, ttsService, new ExternalProcessRunner(Duration.ofMinutes(10)));
     }
 
     public ResponseEntity<byte[]> processVideo(String videoPath, String voiceType,
@@ -128,14 +139,7 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
             List<String> command = new ArrayList<>();
             command.add(ffmpegPath);
             command.addAll(buildExtractCommand(videoPath, audioOutputPath));
-            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            String ffmpegOutput = new String(
-                    process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                log.error("ffmpeg 音频提取失败，FFmpeg 输出：{}", ffmpegOutput);
-                return null;
-            }
+            processRunner.run(command, "ffmpeg 音频提取失败");
             log.info("音频提取成功: {}", audioOutputPath);
             return audioOutputPath;
         } catch (Exception e) {
@@ -168,15 +172,7 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
         command.addAll(buildMergeCommand(
                 videoPath, newAudioPath, subtitlePath, outputVideoPath, audioTempo));
 
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        String ffmpegOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        int exitCode = process.waitFor();
-        if (exitCode != 0) {
-            log.error("视频合成失败，FFmpeg 输出：{}", ffmpegOutput);
-            String detail = ffmpegOutput.lines().filter(line -> !line.isBlank())
-                    .reduce((first, second) -> second).orElse("未知错误");
-            throw new java.io.IOException("视频合成失败: " + detail);
-        }
+        processRunner.run(command, "视频合成失败");
         log.info("最终视频合成完成: {}", outputVideoPath);
         return outputVideoPath;
     }
@@ -223,10 +219,18 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
     }
 
     private double probeDuration(String mediaPath) throws Exception {
-        double duration = new net.bramp.ffmpeg.FFprobe(ffprobePath)
-                .probe(mediaPath).getFormat().duration;
+        String output = processRunner.run(List.of(
+                ffprobePath, "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", mediaPath),
+                "无法读取媒体时长").output();
+        double duration;
+        try {
+            duration = Double.parseDouble(output.trim());
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("无法解析媒体时长", exception);
+        }
         if (!Double.isFinite(duration) || duration <= 0) {
-            throw new IllegalArgumentException("无法读取媒体时长: " + mediaPath);
+            throw new IllegalArgumentException("无法读取媒体时长");
         }
         return duration;
     }

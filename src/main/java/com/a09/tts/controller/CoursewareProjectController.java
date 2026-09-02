@@ -3,12 +3,16 @@ package com.a09.tts.controller;
 import com.a09.tts.service.CoursewareProjectService;
 import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
+import com.a09.tts.task.AsyncTaskService;
+import com.a09.tts.task.AsyncTaskService.TaskCapacityException;
+import com.a09.tts.task.AsyncTaskService.TaskSubmission;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,10 +33,14 @@ import java.nio.file.Files;
 public class CoursewareProjectController {
 
     private final CoursewareProjectService projectService;
+    private final AsyncTaskService taskService;
     private final HttpServletRequest request;
 
-    public CoursewareProjectController(CoursewareProjectService projectService, HttpServletRequest request) {
+    public CoursewareProjectController(CoursewareProjectService projectService,
+                                       AsyncTaskService taskService,
+                                       HttpServletRequest request) {
         this.projectService = projectService;
+        this.taskService = taskService;
         this.request = request;
     }
 
@@ -76,6 +84,41 @@ public class CoursewareProjectController {
         return projectService.generateVideo(id, currentUsername());
     }
 
+    @PostMapping("/{id}/optimize/tasks")
+    public ResponseEntity<TaskSubmission> optimizeTask(
+            @PathVariable String id, @RequestBody OptimizeRequest body) {
+        String owner = currentUsername();
+        ProjectView project = projectService.get(id, owner);
+        return submit(() -> taskService.submit(owner, "COURSEWARE_OPTIMIZE",
+                id + ":" + project.revision() + ":"
+                        + Integer.toHexString(java.util.Objects.hashCode(body.instruction())),
+                () -> projectService.optimize(id, owner, body.instruction()).id()));
+    }
+
+    @PostMapping("/{id}/audio/tasks")
+    public ResponseEntity<TaskSubmission> generateAudioTask(
+            @PathVariable String id, @RequestBody AudioRequest body) {
+        String owner = currentUsername();
+        ProjectView project = projectService.get(id, owner);
+        double speed = effective(body.speed());
+        double pitch = effective(body.pitch());
+        double rhythm = effective(body.rhythm());
+        return submit(() -> taskService.submit(owner, "COURSEWARE_AUDIO",
+                id + ":" + project.revision() + ":" + body.voice()
+                        + ":" + speed + ":" + pitch + ":" + rhythm,
+                () -> projectService.generateAudio(
+                        id, owner, body.voice(), speed, pitch, rhythm).id()));
+    }
+
+    @PostMapping("/{id}/video/tasks")
+    public ResponseEntity<TaskSubmission> generateVideoTask(@PathVariable String id) {
+        String owner = currentUsername();
+        ProjectView project = projectService.get(id, owner);
+        return submit(() -> taskService.submit(owner, "COURSEWARE_VIDEO",
+                id + ":" + project.revision(),
+                () -> projectService.generateVideo(id, owner).id()));
+    }
+
     @GetMapping("/{id}/download/{artifact}")
     public ResponseEntity<Resource> download(@PathVariable String id,
                                              @PathVariable String artifact) throws IOException {
@@ -95,6 +138,14 @@ public class CoursewareProjectController {
         return value == null ? 1.0 : value;
     }
 
+    private ResponseEntity<TaskSubmission> submit(TaskSupplier supplier) {
+        try {
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(supplier.submit());
+        } catch (TaskCapacityException exception) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+        }
+    }
+
     private String currentUsername() {
         Object username = request.getAttribute("username");
         return username == null ? "anonymous" : username.toString();
@@ -107,5 +158,10 @@ public class CoursewareProjectController {
     }
 
     public record AudioRequest(String voice, Double speed, Double pitch, Double rhythm) {
+    }
+
+    @FunctionalInterface
+    private interface TaskSupplier {
+        TaskSubmission submit();
     }
 }
