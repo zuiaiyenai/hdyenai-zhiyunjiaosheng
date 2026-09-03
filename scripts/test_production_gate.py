@@ -70,6 +70,55 @@ class ProductionGateTest(unittest.TestCase):
         self.assertTrue(report["passed"])
         self.assertEqual(5, len(report["checks"]))
 
+    def test_stateful_mix_uses_phase10_business_weights(self):
+        scenarios = production_gate.scenario_paths("mixed", None)
+        counts = {name: sum(1 for scenario, _ in scenarios if scenario == name)
+                  for name in ("login", "voices", "tasks", "courseware")}
+
+        self.assertEqual(
+            {"login": 1, "voices": 4, "tasks": 3, "courseware": 2}, counts
+        )
+
+    def test_stability_scheduler_executes_declared_mix(self):
+        class InlineExecutor:
+            def __init__(self, **_kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def map(self, function, values):
+                function(next(iter(values)))
+                return [None]
+
+        args = types.SimpleNamespace(
+            scenario="mixed",
+            task_id=None,
+            base_url="http://example.test",
+            timeout=1,
+            duration_seconds=10,
+            concurrency=10,
+            min_requests=10,
+            max_error_rate=0.005,
+            output=None,
+        )
+        clock = iter([0, 0, *[value for index in range(10) for value in (index, index)], 10, 10])
+        with mock.patch.object(production_gate, "ThreadPoolExecutor", InlineExecutor), \
+                mock.patch.object(production_gate, "login", return_value="token"), \
+                mock.patch.object(production_gate, "request", return_value=(200, b"", 1)), \
+                mock.patch.object(production_gate.time, "perf_counter", side_effect=clock), \
+                mock.patch.dict(production_gate.os.environ,
+                                {"LOAD_TEST_USERNAME": "user", "LOAD_TEST_PASSWORD": "password"}):
+            report = production_gate.run_stability(args)
+
+        self.assertEqual(
+            {"login": 1, "voices": 4, "tasks": 3, "courseware": 2},
+            report["scenarioCounts"],
+        )
+
     def test_backup_commands_never_include_password(self):
         config = mysql_backup.DatabaseConfig(
             "localhost", "3306", "tts", "user", "secret",

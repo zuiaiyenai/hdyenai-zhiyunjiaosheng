@@ -90,18 +90,30 @@ def run_stability(args):
     durations = array("d")
     statuses = Counter()
     scenario_counts = Counter()
+    next_scenario = 0
 
-    def worker(worker_id):
-        index = worker_id
+    def worker(_worker_id):
+        nonlocal next_scenario
         while time.perf_counter() < deadline:
+            with lock:
+                index = next_scenario
+                next_scenario += 1
             scenario, path = scenarios[index % len(scenarios)]
             request_started = time.perf_counter()
             try:
-                status, _, elapsed = request(
-                    args.base_url + path,
-                    token=token,
-                    timeout=args.timeout,
-                )
+                if scenario == "login":
+                    status, _, elapsed = request(
+                        args.base_url + path,
+                        method="POST",
+                        body={"username": username, "password": password},
+                        timeout=args.timeout,
+                    )
+                else:
+                    status, _, elapsed = request(
+                        args.base_url + path,
+                        token=token,
+                        timeout=args.timeout,
+                    )
             except Exception as error:
                 status = "EXCEPTION_" + type(error).__name__
                 elapsed = (time.perf_counter() - request_started) * 1000
@@ -109,7 +121,6 @@ def run_stability(args):
                 statuses[status] += 1
                 scenario_counts[scenario] += 1
                 durations.append(elapsed)
-            index += args.concurrency
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
         list(executor.map(worker, range(args.concurrency)))
@@ -160,13 +171,25 @@ def run_stability(args):
 def scenario_paths(scenario, task_id):
     if scenario == "health":
         return [("health", "/actuator/health")]
+    if scenario == "login":
+        return [("login", "/user/login")]
     if scenario == "voices":
         return [("voices", "/voice_library/list?page=0&size=20")]
     if scenario == "tasks":
         return [("tasks", "/api/tasks?page=0&size=20")]
+    if scenario == "courseware":
+        return [("courseware", "/courseware/projects?page=0&size=20")]
     paths = [
+        ("login", "/user/login"),
+        ("voices", "/voice_library/list?page=0&size=20"),
+        ("voices", "/voice_library/list?page=0&size=20"),
+        ("voices", "/voice_library/list?page=0&size=20"),
         ("voices", "/voice_library/list?page=0&size=20"),
         ("tasks", "/api/tasks?page=0&size=20"),
+        ("tasks", "/api/tasks?page=0&size=20"),
+        ("tasks", "/api/tasks?page=0&size=20"),
+        ("courseware", "/courseware/projects?page=0&size=20"),
+        ("courseware", "/courseware/projects?page=0&size=20"),
     ]
     if task_id:
         paths.append(("task", f"/api/tasks/{task_id}"))
@@ -196,7 +219,7 @@ def build_parser():
     stability = subparsers.add_parser("stability", help="Run a bounded stability load")
     stability.add_argument("--base-url", default="http://127.0.0.1:8081")
     stability.add_argument(
-        "--scenario", choices=("health", "voices", "tasks", "mixed"),
+        "--scenario", choices=("health", "login", "voices", "tasks", "courseware", "mixed"),
         default="mixed",
     )
     stability.add_argument("--task-id")
