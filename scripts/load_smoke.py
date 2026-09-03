@@ -9,9 +9,9 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 
-def request(url, method="GET", body=None, token=None, timeout=10):
+def request(url, method="GET", body=None, token=None, timeout=10, accept="application/json"):
     data = None if body is None else json.dumps(body).encode("utf-8")
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": accept}
     if data is not None:
         headers["Content-Type"] = "application/json"
     if token:

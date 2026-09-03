@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --requirement requirements.txt
       - name: Test
-        run: python -m pytest -q scripts/test_asr_server.py
+        run: python -m pytest -q scripts/test_*.py
 
   docker:
     runs-on: ubuntu-latest
@@ -43,3 +43,27 @@ jobs:
         run: docker compose --env-file .env.example config
       - name: Build backend image
         run: docker build --tag fctts-backend:ci .
+      - name: Run Linux Compose production gate
+        shell: bash
+        run: |
+          cp .env.example .env
+          cleanup() {
+            docker compose --profile observability logs --no-color > docker-compose.log || true
+            docker compose --profile observability down --volumes
+          }
+          trap cleanup EXIT
+          docker compose --profile observability up --build --detach
+          timeout 240 sh -c 'until docker compose exec -T backend curl -fsS http://127.0.0.1:9091/actuator/health; do sleep 5; done'
+          timeout 120 sh -c 'until curl -fsS http://127.0.0.1:9090/-/ready; do sleep 5; done'
+          docker compose --profile observability ps
+          backend_image="$(docker compose images -q backend)"
+          test -n "$backend_image"
+          docker image inspect "$backend_image" --format '{{.Os}}/{{.Architecture}}'
+      - name: Upload Compose diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-compose-diagnostics
+          path: docker-compose.log
+          if-no-files-found: ignore
+          retention-days: 7

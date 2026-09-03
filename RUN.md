@@ -234,3 +234,54 @@ python scripts\load_smoke.py --base-url http://127.0.0.1:8081 --scenario task --
 ```
 
 输出包含状态码分布、成功率、吞吐量以及 p50/p95/p99 延迟。这是本机短时冒烟数据，不能替代持续压测或用于外推生产容量。
+
+## Production Gate / Phase 9
+
+Keep the application and management ports separate in production. The Docker management port is 9091 and exposes only health, info, and Prometheus.
+
+- `/actuator/health/liveness` reports process liveness.
+- `/actuator/health/readiness` includes database, Redis, GPT-SoVITS, and FunASR readiness.
+- `/actuator/prometheus` exports Prometheus text metrics.
+- `fctts_external_service_up{service="gpt-sovits|funasr"}` reports external speech service availability.
+
+Set `EXTERNAL_SERVICES_REQUIRED=true` for the production gate. It remains false by default so missing speech services do not block nodb development.
+
+~~~powershell
+Copy-Item .env.example .env
+docker compose --profile observability config
+docker compose --profile observability up --build -d
+docker compose --profile observability ps
+~~~
+
+Prometheus binds only to host `127.0.0.1:9090`. Linux Compose maps `host.docker.internal` through `host-gateway` so the backend container can reach host GPT-SoVITS and FunASR services.
+
+Run the live dependency and metrics probe:
+
+~~~powershell
+python scripts\production_gate.py probe --management-url http://127.0.0.1:9091 --tts-url http://127.0.0.1:9880/tts --asr-health-url http://127.0.0.1:9977/health --output target/phase9/production-probe.json
+~~~
+
+Run the bounded stability gate with a dedicated test account:
+
+~~~powershell
+$env:LOAD_TEST_USERNAME='load-test-user'
+$env:LOAD_TEST_PASSWORD='replace-with-local-test-password'
+python scripts\production_gate.py stability --base-url http://127.0.0.1:8081 --scenario mixed --duration-seconds 1800 --concurrency 20 --min-requests 1000 --max-error-rate 0.005 --output target/phase9/stability.json
+~~~
+
+The MySQL backup script passes passwords through `MYSQL_PWD`, not process arguments. Restore verification accepts only a dedicated `tts_restore_verify_` schema and removes it in the cleanup path.
+
+~~~powershell
+python scripts\mysql_backup.py backup --output D:\backups\fctts.sql
+python scripts\mysql_backup.py verify --backup D:\backups\fctts.sql
+~~~
+
+Required variables are `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, and `DB_PASSWORD`. Optional administrator variables are `DB_ADMIN_USERNAME` and `DB_ADMIN_PASSWORD`. Set `MYSQL_CLIENT` and `MYSQLDUMP_CLIENT` when the clients are not on PATH.
+
+The Docker fault drill stops and restores Redis/MySQL. Run it only against an explicitly isolated Compose project:
+
+~~~powershell
+python scripts\docker_fault_drill.py --project-name fctts-phase9-drill --compose-file docker-compose.yml --confirm-isolated-stack
+~~~
+
+The drill checks that overall health/readiness goes down while liveness stays UP and restores services in `finally`. Never run it against a shared or production Compose project.

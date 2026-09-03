@@ -37,6 +37,12 @@ server:
   port: "${SERVER_PORT:8081}"
 
 app:
+  observability:
+    environment: "${APP_ENVIRONMENT:local}"
+    external-services-required: "${EXTERNAL_SERVICES_REQUIRED:false}"
+    probe-timeout: "${EXTERNAL_SERVICE_PROBE_TIMEOUT:2s}"
+    tts-health-url: "${TTS_HEALTH_URL:http://127.0.0.1:9880/tts}"
+    asr-health-url: "${ASR_HEALTH_URL:http://127.0.0.1:9977/health}"
   cleanup:
     retry-delay: "${FILE_CLEANUP_RETRY_DELAY:5m}"
   tasks:
@@ -122,10 +128,28 @@ aliyun:
     access-key-secret: "${ALIYUN_AK_SECRET:}"
 
 management:
+  server:
+    port: "${MANAGEMENT_SERVER_PORT:${SERVER_PORT:8081}}"
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
-      show-details: when_authorized
+      show-details: never
+      probes:
+        enabled: true
+      validate-group-membership: false
+      group:
+        readiness:
+          include: readinessState,db,redis,externalServices
+          show-details: never
+  metrics:
+    tags:
+      application: "${spring.application.name}"
+      environment: "${APP_ENVIRONMENT:local}"
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 100ms,250ms,500ms,1s,2s,5s
