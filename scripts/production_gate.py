@@ -76,6 +76,26 @@ def run_probe(args):
 
 def run_stability(args):
     scenarios = scenario_paths(args.scenario, args.task_id)
+    redis_health = None
+    if args.scenario == "redis_mixed":
+        redis_health = {
+            "before": check_http(
+                "redis-health-before",
+                args.management_url + "/actuator/health/redis",
+                args.timeout,
+            )
+        }
+        if not redis_health["before"]["passed"]:
+            report = {
+                "type": "stability-load",
+                "timestamp": datetime.now(UTC).isoformat(),
+                "scenario": args.scenario,
+                "passed": False,
+                "redisHealth": redis_health,
+                "failures": ["Redis health check failed before load"],
+            }
+            emit(report, args.output)
+            return report
     token = None
     if any(path != "/actuator/health" for _, path in scenarios):
         username = os.getenv("LOAD_TEST_USERNAME")
@@ -139,6 +159,16 @@ def run_stability(args):
         failures.append(
             f"error rate {error_rate:.6f} exceeds maximum {args.max_error_rate:.6f}"
         )
+    if args.scenario == "redis_mixed":
+        redis_health["after"] = check_http(
+            "redis-health-after",
+            args.management_url + "/actuator/health/redis",
+            args.timeout,
+        )
+        if not redis_health["after"]["passed"]:
+            failures.append("Redis health check failed after load")
+        if scenario_counts["login"] == 0:
+            failures.append("Redis-backed login path was not exercised")
     report = {
         "type": "stability-load",
         "timestamp": datetime.now(UTC).isoformat(),
@@ -164,6 +194,13 @@ def run_stability(args):
         "passed": not failures,
         "failures": failures,
     }
+    if redis_health is not None:
+        report["redisHealth"] = redis_health
+        report["redisBackedEvidence"] = {
+            "path": "/user/login",
+            "requests": scenario_counts["login"],
+            "mechanism": "LoginRateLimiter uses Redis when REDIS_ENABLED=true",
+        }
     emit(report, args.output)
     return report
 
@@ -219,9 +256,10 @@ def build_parser():
     stability = subparsers.add_parser("stability", help="Run a bounded stability load")
     stability.add_argument("--base-url", default="http://127.0.0.1:8081")
     stability.add_argument(
-        "--scenario", choices=("health", "login", "voices", "tasks", "courseware", "mixed"),
+        "--scenario", choices=("health", "login", "voices", "tasks", "courseware", "mixed", "redis_mixed"),
         default="mixed",
     )
+    stability.add_argument("--management-url", default="http://127.0.0.1:9091")
     stability.add_argument("--task-id")
     stability.add_argument("--duration-seconds", type=int, default=1800)
     stability.add_argument("--concurrency", type=int, default=20)

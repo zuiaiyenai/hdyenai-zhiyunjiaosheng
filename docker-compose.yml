@@ -76,6 +76,7 @@ services:
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0}
     ports:
       - "${SERVER_PORT:-8081}:8081"
+      - "127.0.0.1:${MANAGEMENT_PORT:-9091}:9091"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

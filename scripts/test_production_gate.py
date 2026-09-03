@@ -78,6 +78,22 @@ class ProductionGateTest(unittest.TestCase):
         self.assertEqual(
             {"login": 1, "voices": 4, "tasks": 3, "courseware": 2}, counts
         )
+        self.assertEqual(scenarios, production_gate.scenario_paths("redis_mixed", None))
+
+    def test_redis_mix_requires_healthy_redis_before_load(self):
+        args = types.SimpleNamespace(
+            scenario="redis_mixed",
+            task_id=None,
+            management_url="http://management.test",
+            timeout=1,
+            output=None,
+        )
+        unhealthy = {"name": "redis", "status": 503, "passed": False}
+        with mock.patch.object(production_gate, "check_http", return_value=unhealthy) as check:
+            report = production_gate.run_stability(args)
+
+        self.assertFalse(report["passed"])
+        self.assertEqual(1, check.call_count)
 
     def test_stability_scheduler_executes_declared_mix(self):
         class InlineExecutor:
@@ -104,6 +120,7 @@ class ProductionGateTest(unittest.TestCase):
             min_requests=10,
             max_error_rate=0.005,
             output=None,
+            management_url="http://management.test",
         )
         clock = iter([0, 0, *[value for index in range(10) for value in (index, index)], 10, 10])
         with mock.patch.object(production_gate, "ThreadPoolExecutor", InlineExecutor), \

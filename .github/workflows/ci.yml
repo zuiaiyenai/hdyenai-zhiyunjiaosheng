@@ -3,6 +3,12 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      soak_seconds:
+        description: Redis-backed qualification duration in seconds
+        required: false
+        default: "1800"
 
 permissions:
   contents: read
@@ -35,35 +41,132 @@ jobs:
       - name: Test
         run: python -m pytest -q scripts/test_*.py
 
-  docker:
+  frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Compose
-        run: docker compose --env-file .env.example config
-      - name: Build backend image
-        run: docker build --tag fctts-backend:ci .
-      - name: Run Linux Compose production gate
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build recovered frontend source
+        run: pnpm build
+      - name: Upload recovered frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovered-frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  production-gate-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      COMPOSE_PROJECT_NAME: fctts-phase11-ci
+      SOAK_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_seconds || '180' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prepare diagnostics and Compose environment
         shell: bash
         run: |
+          mkdir -p artifacts/phase11
           cp .env.example .env
-          cleanup() {
-            docker compose --profile observability logs --no-color > docker-compose.log || true
-            docker compose --profile observability down --volumes
-          }
-          trap cleanup EXIT
-          docker compose --profile observability up --build --detach
-          timeout 240 sh -c 'until docker compose exec -T backend curl -fsS http://127.0.0.1:9091/actuator/health; do sleep 5; done'
-          timeout 120 sh -c 'until curl -fsS http://127.0.0.1:9090/-/ready; do sleep 5; done'
-          docker compose --profile observability ps
-          backend_image="$(docker compose images -q backend)"
-          test -n "$backend_image"
-          docker image inspect "$backend_image" --format '{{.Os}}/{{.Architecture}}'
-      - name: Upload Compose diagnostics
+      - name: Validate Compose
+        run: docker compose --env-file .env.example config
+      - name: Build Linux backend image
+        run: docker build --tag fctts-backend:phase11 .
+      - name: Build Compose services
+        run: docker compose --profile observability build
+      - name: Boot Compose and wait for health
+        run: docker compose --profile observability up --detach --wait --wait-timeout 360
+      - name: Verify dependencies, health, tools, and API smoke
+        shell: bash
+        run: |
+          docker compose ps
+          docker compose exec -T mysql sh -c 'mysqladmin ping -h 127.0.0.1 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --silent'
+          docker compose exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" ping' | grep PONG
+          curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/liveness
+          curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/readiness
+          curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/redis
+          curl --fail --silent --show-error http://127.0.0.1:8081/ > /dev/null
+          docker compose exec -T backend ffmpeg -version
+          docker compose exec -T backend ffprobe -version
+      - name: Run Redis and MySQL outage/recovery drill
+        run: >-
+          python scripts/docker_fault_drill.py
+          --project-name "$COMPOSE_PROJECT_NAME"
+          --confirm-isolated-stack
+          --output artifacts/phase11/fault-drill.json
+      - name: Run Redis-backed mixed load gate
+        shell: bash
+        run: |
+          username="phase11_ci_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          password="Phase11Load!9"
+          register_status="$(curl --silent --output artifacts/phase11/load-user-register.json --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' \
+            --data "{\"username\":\"${username}\",\"password\":\"${password}\"}" \
+            http://127.0.0.1:8081/user/register)"
+          test "$register_status" = "201"
+          echo "LOAD_TEST_USERNAME=$username" >> "$GITHUB_ENV"
+          echo "LOAD_TEST_PASSWORD=$password" >> "$GITHUB_ENV"
+          LOAD_TEST_USERNAME="$username" LOAD_TEST_PASSWORD="$password" \
+            python scripts/production_gate.py stability \
+              --scenario redis_mixed \
+              --management-url http://127.0.0.1:9091 \
+              --duration-seconds "$SOAK_SECONDS" \
+              --concurrency 10 \
+              --min-requests 100 \
+              --max-error-rate 0.01 \
+              --output artifacts/phase11/redis-mixed.json
+      - name: Restart backend and verify persisted DB state
+        shell: bash
+        run: |
+          docker compose restart backend
+          timeout 240 bash -c 'until curl --fail --silent http://127.0.0.1:9091/actuator/health/readiness; do sleep 5; done'
+          python scripts/production_gate.py stability \
+            --scenario voices \
+            --duration-seconds 5 \
+            --concurrency 2 \
+            --min-requests 2 \
+            --max-error-rate 0 \
+            --output artifacts/phase11/post-restart-voices.json
+      - name: Collect Compose diagnostics
+        if: always()
+        shell: bash
+        run: |
+          docker compose --profile observability ps --all > artifacts/phase11/compose-ps.txt || true
+          docker compose --profile observability images > artifacts/phase11/compose-images.txt || true
+          docker compose --profile observability logs --no-color > artifacts/phase11/compose.log || true
+          docker compose logs --no-color backend > artifacts/phase11/backend.log || true
+          container_ids="$(docker compose --profile observability ps --all --quiet || true)"
+          if [ -n "$container_ids" ]; then
+            docker inspect $container_ids > artifacts/phase11/container-inspect.json || true
+          fi
+      - name: Teardown isolated stack
+        if: always()
+        run: docker compose --profile observability down --volumes --remove-orphans
+      - name: Upload production gate diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: docker-compose-diagnostics
-          path: docker-compose.log
-          if-no-files-found: ignore
-          retention-days: 7
+          name: production-gate-linux-diagnostics
+          path: artifacts/phase11
+          if-no-files-found: warn
+          retention-days: 14

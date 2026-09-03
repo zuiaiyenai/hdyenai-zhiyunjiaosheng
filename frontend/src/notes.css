@@ -1,0 +1,80 @@
+.notes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+
+.compact-drop {
+  min-height: 110px;
+}
+
+.note-list {
+  margin-top: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.note-list p {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.note-list span {
+  color: #6f8594;
+}
+
+.stream-status {
+  align-self: center;
+  margin-right: auto;
+  color: #42677d;
+  font-size: 12px;
+}
+
+.download {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.more-button {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  border: 1px solid #ffffff66;
+  border-radius: 4px;
+  padding: 9px;
+  color: white;
+  background: #ffffff1c;
+}
+
+.field-help {
+  margin: 10px 0 14px;
+  color: #e4f4ff;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.voice-card .use-voice {
+  width: auto;
+  height: auto;
+  margin-left: auto;
+  border-radius: 4px;
+  padding: 7px 12px;
+}
+
+.empty-hint {
+  margin: 10px 0 0;
+  color: #718899;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .notes-grid {
+    grid-template-columns: 1fr;
+  }
+}
