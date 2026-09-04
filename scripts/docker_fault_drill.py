@@ -129,7 +129,7 @@ def run(args):
     redis_health = args.management_url + "/actuator/health/redis"
     liveness = args.management_url + "/actuator/health/liveness"
     readiness = args.management_url + "/actuator/health/readiness"
-    voice_path = "/voice_library/list?page=0&size=20"
+    voice_path = "/voice_library/search?name=qualification%20voice&page=0&size=20"
 
     wait_for(readiness, {200})
     wait_for(redis_health, {200})

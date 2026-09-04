@@ -51,6 +51,10 @@ class DockerFaultDrillTest(unittest.TestCase):
             report = docker_fault_drill.run(args)
 
         self.assertTrue(report["passed"])
+        self.assertTrue(all(
+            call.args[2] == "/voice_library/search?name=qualification%20voice&page=0&size=20"
+            for call in authenticated.call_args_list
+        ))
         self.assertEqual(
             [mock.call(args, "stop", "redis"),
              mock.call(args, "start", "redis"),
