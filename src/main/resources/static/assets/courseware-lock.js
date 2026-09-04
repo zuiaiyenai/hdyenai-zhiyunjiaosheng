@@ -332,6 +332,62 @@
     let project=null;
     let busy=false;
     let audioUrl="";
+    let pollTimer=0;
+
+    function stopPolling(){
+      window.clearTimeout(pollTimer);
+      pollTimer=0;
+    }
+
+    function waitToPoll(milliseconds){
+      return new Promise(resolve=>{
+        pollTimer=window.setTimeout(resolve,milliseconds);
+      });
+    }
+
+    async function pollTask(taskId){
+      const deadline=Date.now()+16*60*1000;
+      stopPolling();
+      while(body.isConnected&&Date.now()<deadline){
+        let task;
+        try{
+          task=await request(`/api/tasks/${encodeURIComponent(taskId)}`);
+        }catch{
+          show("服务暂不可用，正在重新查询任务状态…");
+          await waitToPoll(2000);
+          continue;
+        }
+        if(task.status==="SUCCESS"){
+          stopPolling();
+          show("任务完成，正在刷新结果…","success");
+          return task;
+        }
+        if(["FAILED","CANCELLED","TIMEOUT"].includes(task.status)){
+          stopPolling();
+          const messages={
+            FAILED:"任务执行失败。",
+            CANCELLED:"任务已取消。",
+            TIMEOUT:"任务执行超时。"
+          };
+          throw new Error(task.errorMessage||messages[task.status]);
+        }
+        const progress=Number.isFinite(task.progress)?`（${task.progress}%）`:"";
+        show(task.status==="RUNNING"?`任务执行中${progress}…`:`任务已提交，等待执行${progress}…`);
+        await waitToPoll(1000);
+      }
+      stopPolling();
+      throw new Error(body.isConnected?"任务状态查询超时，请稍后重试。":"页面已切换，已停止查询任务状态。");
+    }
+
+    async function submitTask(path,options){
+      const submission=await request(path,options);
+      if(!submission||!submission.taskId)throw new Error("任务提交失败：未返回 taskId。");
+      await pollTask(submission.taskId);
+      project=await request(`/courseware/projects/${project.id}`);
+      render();
+    }
+
+    window.addEventListener("pagehide",stopPolling,{once:true});
     const get=role=>body.querySelector(`[data-role="${role}"]`);
     const action=name=>body.querySelector(`[data-action="${name}"]`);
     const status=getStatus;
@@ -427,7 +483,7 @@
       const instruction=get("instruction").value.trim();
       if(!instruction)throw new Error("请输入本轮讲稿调整要求。");
       await syncScript();
-      project=await request(`/courseware/projects/${project.id}/optimize`,{
+      await submitTask(`/courseware/projects/${project.id}/optimize/tasks`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({instruction})
@@ -459,7 +515,7 @@
 
     action("audio").addEventListener("click",()=>run("正在按所选语音参数生成讲稿语音…",async()=>{
       await syncScript();
-      project=await request(`/courseware/projects/${project.id}/audio`,{
+      await submitTask(`/courseware/projects/${project.id}/audio/tasks`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
@@ -493,7 +549,7 @@
 
     action("video").addEventListener("click",()=>run("正在渲染 PPT 并合成录播课程，可能需要几分钟…",async()=>{
       await syncScript();
-      project=await request(`/courseware/projects/${project.id}/video`,{method:"POST"});
+      await submitTask(`/courseware/projects/${project.id}/video/tasks`,{method:"POST"});
       render();
       show("录播课程已生成，可以下载 MP4。","success");
     }));
