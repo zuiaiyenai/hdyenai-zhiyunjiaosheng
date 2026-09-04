@@ -95,6 +95,40 @@ class ProductionGateTest(unittest.TestCase):
         self.assertFalse(report["passed"])
         self.assertEqual(1, check.call_count)
 
+    def test_selects_required_resource_metrics_without_high_cardinality_labels(self):
+        payload = b"""# HELP ignored ignored
+process_cpu_usage 0.25
+jvm_memory_used_bytes{area="heap",id="G1 Old Gen"} 42
+executor_active_threads{name="fctts.async.tasks"} 1
+http_server_requests_seconds_count{uri="/api/tasks/123"} 9
+"""
+
+        metrics = production_gate.selected_prometheus_metrics(payload)
+
+        self.assertEqual(0.25, metrics["process_cpu_usage"])
+        self.assertEqual(
+            42, metrics['jvm_memory_used_bytes{area="heap",id="G1 Old Gen"}']
+        )
+        self.assertNotIn(
+            'http_server_requests_seconds_count{uri="/api/tasks/123"}', metrics
+        )
+
+    def test_resource_validation_requires_start_end_and_gate_series(self):
+        sample = {
+            "prometheus": {name: 0 for name in production_gate.REQUIRED_RESOURCE_METRICS},
+            "dockerStats": {},
+            "processRssBytes": 0,
+            "uploadBytes": 0,
+            "uploadFileCount": 0,
+            "tempFileCount": 0,
+            "pendingCleanupCount": 0,
+            "backendLogBytes": 0,
+            "redisErrorLines": 0,
+        }
+
+        self.assertEqual([], production_gate.validate_resource_samples([sample, sample]))
+        self.assertTrue(production_gate.validate_resource_samples([sample]))
+
     def test_stability_scheduler_executes_declared_mix(self):
         class InlineExecutor:
             def __init__(self, **_kwargs):

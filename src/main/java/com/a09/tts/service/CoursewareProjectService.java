@@ -548,6 +548,12 @@ public class CoursewareProjectService {
         state.errorMessage = data.errorMessage();
         state.createdAt = data.createdAt();
         state.updatedAt = data.updatedAt();
+        if ("PROCESSING".equals(state.status)) {
+            state.status = "FAILED";
+            state.errorMessage = "应用重启导致课件处理任务中断";
+            state.updatedAt = Instant.now();
+            persist(state);
+        }
         for (RevisionData revision : projectRepository.findRevisions(data.projectId())) {
             state.revisions.add(new Revision(revision.revisionNumber(), revision.instruction(),
                     revision.script(), revision.createdAt()));

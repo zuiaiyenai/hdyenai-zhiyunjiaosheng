@@ -4,6 +4,7 @@ import com.a09.tts.api.PageResult;
 import com.a09.tts.api.ResourceNotFoundException;
 import com.a09.tts.task.AsyncTaskService.TaskCapacityException;
 import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -16,6 +17,36 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AsyncTaskServiceTest {
+
+    @Test
+    void publishesExecutorActiveAndQueueMetrics() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AsyncTaskService service = new AsyncTaskService(
+                new InMemoryTaskRepository(), 1, 1, 2,
+                Duration.ofSeconds(5), 2, registry);
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            TaskSubmission first = service.submit("alice", "ONE", null, () -> {
+                running.countDown();
+                release.await();
+                return "one";
+            });
+            assertTrue(running.await(1, TimeUnit.SECONDS));
+            TaskSubmission second = service.submit("bob", "TWO", null, () -> "two");
+
+            assertEquals(1.0, registry.get("executor.active")
+                    .tag("name", "fctts.async.tasks").gauge().value());
+            assertEquals(1.0, registry.get("executor.queued")
+                    .tag("name", "fctts.async.tasks").gauge().value());
+
+            service.cancel(first.taskId(), "alice");
+            service.cancel(second.taskId(), "bob");
+        } finally {
+            release.countDown();
+            service.shutdown();
+        }
+    }
 
     @Test
     void completesFailsAndScopesTasksByOwner() throws Exception {
@@ -168,7 +199,8 @@ class AsyncTaskServiceTest {
     private AsyncTaskService service(InMemoryTaskRepository repository,
                                      int core, int max, int queue,
                                      Duration timeout, int perUser) {
-        return new AsyncTaskService(repository, core, max, queue, timeout, perUser);
+        return new AsyncTaskService(
+                repository, core, max, queue, timeout, perUser, new SimpleMeterRegistry());
     }
 
     private TaskRecord awaitTerminal(AsyncTaskService service, String id, String owner)

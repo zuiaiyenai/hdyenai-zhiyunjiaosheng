@@ -69,7 +69,7 @@ jobs:
 
   production-gate-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 75
     env:
       COMPOSE_PROJECT_NAME: fctts-phase11-ci
       SOAK_SECONDS: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_seconds || '180' }}
@@ -88,8 +88,9 @@ jobs:
         run: |
           mkdir -p artifacts/phase11
           cp .env.example .env
+          sed -i 's/^DB_NAME=.*/DB_NAME=tts_restore_verify_phase11_ci/' .env
       - name: Validate Compose
-        run: docker compose --env-file .env.example config
+        run: docker compose --env-file .env config
       - name: Build Linux backend image
         run: docker build --tag fctts-backend:phase11 .
       - name: Build Compose services
@@ -100,8 +101,8 @@ jobs:
         shell: bash
         run: |
           docker compose ps
-          docker compose exec -T mysql sh -c 'mysqladmin ping -h 127.0.0.1 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --silent'
-          docker compose exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWORD" ping' | grep PONG
+          docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysqladmin ping -h 127.0.0.1 -u"$MYSQL_USER" --silent'
+          docker compose exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping' | grep PONG
           curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/liveness
           curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/readiness
           curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/redis
@@ -134,6 +135,10 @@ jobs:
               --concurrency 10 \
               --min-requests 100 \
               --max-error-rate 0.01 \
+              --collect-resources \
+              --require-resource-metrics \
+              --resource-sample-interval 60 \
+              --compose-project-name "$COMPOSE_PROJECT_NAME" \
               --output artifacts/phase11/redis-mixed.json
       - name: Restart backend and verify persisted DB state
         shell: bash
@@ -147,6 +152,98 @@ jobs:
             --min-requests 2 \
             --max-error-rate 0 \
             --output artifacts/phase11/post-restart-voices.json
+      - name: Backup, destroy, restore, and verify dedicated schema
+        shell: bash
+        run: |
+          set -a
+          source .env
+          set +a
+          case "$DB_NAME" in
+            tts_restore_verify_*) ;;
+            *) echo "Refusing to destroy non-dedicated schema: $DB_NAME" >&2; exit 1 ;;
+          esac
+
+          docker compose stop backend
+          fixture_project="$(python -c 'import uuid; print(uuid.uuid4())')"
+          fixture_task="$(python -c 'import uuid; print(uuid.uuid4())')"
+          fixture_sql="INSERT INTO voice
+            (voice_name, application_scene, file_path, mime_type, public_visible, owner_username)
+            VALUES ('qualification voice', 'release gate', 'qualification/voice.wav',
+                    'audio/wav', FALSE, '${LOAD_TEST_USERNAME}');
+            INSERT INTO courseware_project
+            (project_id, owner_username, project_name, status, source_path, output_path,
+             file_name, script, revision, voice)
+            VALUES ('${fixture_project}', '${LOAD_TEST_USERNAME}', 'qualification project',
+                    'SUCCESS', 'qualification/source.pptx', 'qualification/output',
+                    'source.pptx', 'qualification script', 1, 'longxiao');
+            INSERT INTO courseware_project_revision
+            (project_id, revision_number, instruction, script)
+            VALUES ('${fixture_project}', 1, 'qualification', 'qualification script');
+            INSERT INTO async_task
+            (task_id, owner_username, task_type, status, progress, result_data, finished_at)
+            VALUES ('${fixture_task}', '${LOAD_TEST_USERNAME}', 'QUALIFICATION',
+                    'SUCCESS', 100, 'restored', CURRENT_TIMESTAMP);
+            INSERT INTO pending_file_cleanup (storage_type, relative_path)
+            VALUES ('VOICE', 'qualification/missing.wav');"
+          docker compose exec -T mysql sh -c \
+            'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql --protocol=tcp -h 127.0.0.1 \
+             -u"$MYSQL_USER" "$MYSQL_DATABASE"' <<< "$fixture_sql"
+
+          count_sql='SELECT "user", COUNT(*) FROM `user`
+            UNION ALL SELECT "voice", COUNT(*) FROM voice
+            UNION ALL SELECT "courseware_project", COUNT(*) FROM courseware_project
+            UNION ALL SELECT "courseware_project_revision", COUNT(*) FROM courseware_project_revision
+            UNION ALL SELECT "async_task", COUNT(*) FROM async_task
+            UNION ALL SELECT "pending_file_cleanup", COUNT(*) FROM pending_file_cleanup
+            UNION ALL SELECT "flyway_schema_history", COUNT(*) FROM flyway_schema_history;'
+          docker compose exec -T mysql sh -c \
+            'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql --protocol=tcp -h 127.0.0.1 \
+             -u"$MYSQL_USER" --skip-column-names "$MYSQL_DATABASE"' \
+            <<< "$count_sql" > artifacts/phase11/backup-counts-before.tsv
+
+          backup=artifacts/phase11/dedicated-schema.sql
+          docker compose exec -T mysql sh -c \
+            'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump --protocol=tcp -h 127.0.0.1 \
+             -u"$MYSQL_USER" --single-transaction --quick --triggers --hex-blob \
+             --set-gtid-purged=OFF "$MYSQL_DATABASE"' > "$backup"
+          sha256sum "$backup" > "${backup}.sha256"
+          stat --format='bytes=%s' "$backup" > artifacts/phase11/backup-size.txt
+
+          destroy_sql="DROP DATABASE ${DB_NAME};
+            CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          docker compose exec -T mysql sh -c \
+            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --protocol=tcp -h 127.0.0.1 \
+             -uroot' <<< "$destroy_sql"
+          docker compose exec -T mysql sh -c \
+            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --protocol=tcp -h 127.0.0.1 \
+             -uroot "$MYSQL_DATABASE"' < "$backup"
+          sha256sum --check "${backup}.sha256"
+
+          docker compose exec -T mysql sh -c \
+            'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql --protocol=tcp -h 127.0.0.1 \
+             -u"$MYSQL_USER" --skip-column-names "$MYSQL_DATABASE"' \
+            <<< "$count_sql" > artifacts/phase11/backup-counts-restored.tsv
+          diff --unified artifacts/phase11/backup-counts-before.tsv \
+            artifacts/phase11/backup-counts-restored.tsv
+
+          docker compose start backend
+          timeout 240 bash -c \
+            'until curl --fail --silent http://127.0.0.1:9091/actuator/health/readiness; do sleep 5; done'
+          login_status="$(curl --silent --output artifacts/phase11/post-restore-login.json \
+            --write-out '%{http_code}' --header 'Content-Type: application/json' \
+            --data "{\"username\":\"${LOAD_TEST_USERNAME}\",\"password\":\"${LOAD_TEST_PASSWORD}\"}" \
+            http://127.0.0.1:8081/user/login)"
+          test "$login_status" = "200"
+          token="$(python -c 'import json; print(json.load(open("artifacts/phase11/post-restore-login.json"))["token"])')"
+          for endpoint in \
+            '/voice_library/list?page=0&size=20' \
+            '/api/tasks?page=0&size=20' \
+            '/courseware/projects?page=0&size=20'
+          do
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $token" \
+              "http://127.0.0.1:8081${endpoint}" > /dev/null
+          done
       - name: Collect Compose diagnostics
         if: always()
         shell: bash

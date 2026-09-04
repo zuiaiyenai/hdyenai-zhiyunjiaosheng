@@ -1,6 +1,8 @@
 import argparse
 import json
 import os
+import re
+import subprocess
 import threading
 import time
 from array import array
@@ -10,6 +12,27 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from load_smoke import login, percentile, request
+
+
+PROMETHEUS_SAMPLE = re.compile(
+    r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)(?P<labels>\{.*\})?\s+"
+    r"(?P<value>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|NaN|[+-]Inf)"
+)
+REQUIRED_RESOURCE_METRICS = (
+    "process_cpu_usage",
+    "system_cpu_usage",
+    "jvm_memory_used_bytes",
+    "jvm_gc_pause_seconds_count",
+    "jvm_gc_pause_seconds_sum",
+    "jvm_threads_live_threads",
+    "executor_active_threads",
+    "executor_queued_tasks",
+    "hikaricp_connections_active",
+    "hikaricp_connections_idle",
+    "hikaricp_connections_pending",
+    "disk_free_bytes",
+    "disk_total_bytes",
+)
 
 
 def check_http(name, url, timeout, accepted=None, contains=None, method="GET", accept="application/json"):
@@ -104,6 +127,21 @@ def run_stability(args):
             raise SystemExit("LOAD_TEST_USERNAME and LOAD_TEST_PASSWORD are required")
         token = login(args.base_url, username, password, args.timeout)
 
+    resource_samples = []
+    stop_sampling = threading.Event()
+    sampler = None
+    if getattr(args, "collect_resources", False):
+        resource_samples.append(collect_resource_sample(args))
+
+        def sample_until_stopped():
+            while not stop_sampling.wait(args.resource_sample_interval):
+                resource_samples.append(collect_resource_sample(args))
+
+        sampler = threading.Thread(
+            target=sample_until_stopped, name="qualification-resource-sampler", daemon=True
+        )
+        sampler.start()
+
     deadline = time.perf_counter() + args.duration_seconds
     started = time.perf_counter()
     lock = threading.Lock()
@@ -142,8 +180,14 @@ def run_stability(args):
                 scenario_counts[scenario] += 1
                 durations.append(elapsed)
 
-    with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
-        list(executor.map(worker, range(args.concurrency)))
+    try:
+        with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
+            list(executor.map(worker, range(args.concurrency)))
+    finally:
+        if sampler is not None:
+            stop_sampling.set()
+            sampler.join(timeout=args.resource_sample_interval + args.timeout)
+            resource_samples.append(collect_resource_sample(args))
 
     wall_seconds = time.perf_counter() - started
     total = sum(statuses.values())
@@ -169,6 +213,10 @@ def run_stability(args):
             failures.append("Redis health check failed after load")
         if scenario_counts["login"] == 0:
             failures.append("Redis-backed login path was not exercised")
+    if resource_samples:
+        resource_failures = validate_resource_samples(resource_samples)
+        if getattr(args, "require_resource_metrics", False):
+            failures.extend(resource_failures)
     report = {
         "type": "stability-load",
         "timestamp": datetime.now(UTC).isoformat(),
@@ -201,8 +249,133 @@ def run_stability(args):
             "requests": scenario_counts["login"],
             "mechanism": "LoginRateLimiter uses Redis when REDIS_ENABLED=true",
         }
+    if resource_samples:
+        report["resources"] = {
+            "sampleIntervalSeconds": args.resource_sample_interval,
+            "sampleCount": len(resource_samples),
+            "start": resource_samples[0],
+            "end": resource_samples[-1],
+            "samples": resource_samples,
+            "validationFailures": validate_resource_samples(resource_samples),
+        }
     emit(report, args.output)
     return report
+
+
+def selected_prometheus_metrics(payload):
+    selected = {}
+    for line in payload.decode("utf-8", errors="replace").splitlines():
+        match = PROMETHEUS_SAMPLE.match(line)
+        if not match:
+            continue
+        name = match.group("name")
+        if not (
+            name in REQUIRED_RESOURCE_METRICS
+            or name in ("disk_free_bytes", "disk_total_bytes", "fctts_external_service_up")
+            or "redis" in name
+            or "lettuce" in name
+        ):
+            continue
+        try:
+            value = float(match.group("value"))
+        except ValueError:
+            continue
+        selected[name + (match.group("labels") or "")] = value
+    return selected
+
+
+def compose_command(args, *command):
+    result = subprocess.run(
+        [
+            "docker", "compose", "--project-name", args.compose_project_name,
+            "--file", args.compose_file, *command,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=args.timeout,
+    )
+    return result.stdout.strip()
+
+
+def collect_resource_sample(args):
+    sample = {"timestamp": datetime.now(UTC).isoformat()}
+    errors = []
+    try:
+        status_code, payload, _ = request(
+            args.management_url + "/actuator/prometheus",
+            timeout=args.timeout,
+            accept="text/plain;version=0.0.4,*/*;q=0.1",
+        )
+        if status_code != 200:
+            raise RuntimeError(f"Prometheus returned HTTP {status_code}")
+        sample["prometheus"] = selected_prometheus_metrics(payload)
+    except Exception as error:
+        errors.append("prometheus:" + type(error).__name__)
+
+    if getattr(args, "compose_project_name", None):
+        try:
+            container_id = compose_command(args, "ps", "--quiet", "backend")
+            sample["dockerStats"] = json.loads(subprocess.run(
+                ["docker", "stats", "--no-stream", "--format", "{{json .}}", container_id],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
+            ).stdout)
+        except Exception as error:
+            errors.append("dockerStats:" + type(error).__name__)
+        commands = {
+            "processRssBytes": "awk '/VmRSS/ {print $2 * 1024}' /proc/1/status",
+            "uploadBytes": "du -sb /app/uploads | cut -f1",
+            "uploadFileCount": "find /app/uploads -type f | wc -l",
+            "tempFileCount": "find /tmp -type f | wc -l",
+            "pendingCleanupCount": (
+                "MYSQL_PWD=\"$MYSQL_PASSWORD\" exec mysql --protocol=tcp "
+                "-h 127.0.0.1 -u\"$MYSQL_USER\" --skip-column-names "
+                "-e 'SELECT COUNT(*) FROM pending_file_cleanup' \"$MYSQL_DATABASE\""
+            ),
+        }
+        for key, command in commands.items():
+            service = "mysql" if key == "pendingCleanupCount" else "backend"
+            try:
+                sample[key] = int(compose_command(
+                    args, "exec", "-T", service, "sh", "-c", command
+                ))
+            except Exception as error:
+                errors.append(key + ":" + type(error).__name__)
+        try:
+            backend_logs = compose_command(args, "logs", "--no-color", "backend")
+            sample["backendLogBytes"] = len(backend_logs.encode("utf-8"))
+            sample["redisErrorLines"] = sum(
+                1 for line in backend_logs.splitlines()
+                if re.search(r"(?i)(redis.*(error|timeout)|((error|timeout).*redis))", line)
+            )
+        except Exception as error:
+            errors.append("backendLogs:" + type(error).__name__)
+    if errors:
+        sample["errors"] = errors
+    return sample
+
+
+def validate_resource_samples(samples):
+    failures = []
+    if len(samples) < 2:
+        failures.append("Resource sampling did not capture start and end")
+        return failures
+    for position, sample in (("start", samples[0]), ("end", samples[-1])):
+        if sample.get("errors"):
+            failures.append(f"Resource {position} sample errors: {sample['errors']}")
+        metrics = sample.get("prometheus", {})
+        for required in REQUIRED_RESOURCE_METRICS:
+            if not any(key.startswith(required) for key in metrics):
+                failures.append(f"Resource {position} sample missing {required}")
+        for required in ("dockerStats", "processRssBytes", "uploadBytes",
+                         "uploadFileCount", "tempFileCount", "pendingCleanupCount",
+                         "backendLogBytes", "redisErrorLines"):
+            if required not in sample:
+                failures.append(f"Resource {position} sample missing {required}")
+    return failures
 
 
 def scenario_paths(scenario, task_id):
@@ -266,6 +439,11 @@ def build_parser():
     stability.add_argument("--timeout", type=int, default=10)
     stability.add_argument("--min-requests", type=int, default=1000)
     stability.add_argument("--max-error-rate", type=float, default=0.005)
+    stability.add_argument("--collect-resources", action="store_true")
+    stability.add_argument("--require-resource-metrics", action="store_true")
+    stability.add_argument("--resource-sample-interval", type=int, default=60)
+    stability.add_argument("--compose-project-name")
+    stability.add_argument("--compose-file", default="docker-compose.yml")
     stability.add_argument("--output")
     return parser
 
@@ -274,7 +452,8 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     if args.command == "stability":
-        if args.duration_seconds < 1 or args.concurrency < 1 or args.min_requests < 1:
+        if (args.duration_seconds < 1 or args.concurrency < 1 or args.min_requests < 1
+                or args.resource_sample_interval < 1):
             parser.error("duration, concurrency and min-requests must be positive")
         if not 0 <= args.max_error_rate <= 1:
             parser.error("max-error-rate must be between 0 and 1")

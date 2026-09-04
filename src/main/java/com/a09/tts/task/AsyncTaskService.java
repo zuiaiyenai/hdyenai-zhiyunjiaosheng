@@ -5,8 +5,12 @@ import com.a09.tts.api.Pagination;
 import com.a09.tts.api.ResourceNotFoundException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -43,13 +47,15 @@ public class AsyncTaskService {
     private final Map<String, String> activeDeduplication = new ConcurrentHashMap<>();
     private final Object[] taskLocks = new Object[64];
 
+    @Autowired
     public AsyncTaskService(
             TaskRepository repository,
             @Value("${app.tasks.core-pool-size:2}") int corePoolSize,
             @Value("${app.tasks.max-pool-size:4}") int maxPoolSize,
             @Value("${app.tasks.queue-capacity:20}") int queueCapacity,
             @Value("${app.tasks.timeout:15m}") Duration timeout,
-            @Value("${app.tasks.per-user-concurrency:2}") int perUserConcurrency) {
+            @Value("${app.tasks.per-user-concurrency:2}") int perUserConcurrency,
+            MeterRegistry meterRegistry) {
         if (corePoolSize < 1 || maxPoolSize < corePoolSize || queueCapacity < 1
                 || perUserConcurrency < 1 || timeout == null
                 || timeout.isZero() || timeout.isNegative()) {
@@ -71,6 +77,8 @@ public class AsyncTaskService {
                 corePoolSize, maxPoolSize, 60, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(queueCapacity), workerFactory,
                 new ThreadPoolExecutor.AbortPolicy());
+        ExecutorServiceMetrics.monitor(
+                meterRegistry, executor, "fctts.async.tasks", Tags.empty());
         this.scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
             Thread thread = new Thread(runnable, "media-task-timeout");
             thread.setDaemon(true);

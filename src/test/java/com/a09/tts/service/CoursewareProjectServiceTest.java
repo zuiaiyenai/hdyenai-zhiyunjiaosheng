@@ -139,6 +139,25 @@ class CoursewareProjectServiceTest {
     }
 
     @Test
+    void marksInterruptedProjectFailedAfterServiceRestart() {
+        InMemoryCoursewareProjectRepository repository = new InMemoryCoursewareProjectRepository();
+        Instant now = Instant.now();
+        repository.save(new ProjectData(
+                "interrupted", "alice", "中断项目", "PROCESSING",
+                "alice/interrupted/source.pptx", "alice/interrupted", "source.pptx", "讲稿", 0,
+                "longxiao", 1.0, 1.0, 1.0, null, null, null, null, now, now));
+        CoursewareProjectService restarted = service(mock(PPTService.class), repository);
+
+        ProjectView restored = restarted.get("interrupted", "alice");
+
+        assertEquals("FAILED", restored.status());
+        assertEquals("应用重启导致课件处理任务中断", restored.errorMessage());
+        ProjectData stored = repository.findByIdAndOwner("interrupted", "alice").orElseThrow();
+        assertEquals("FAILED", stored.status());
+        assertEquals("应用重启导致课件处理任务中断", stored.errorMessage());
+    }
+
+    @Test
     void rejectsPersistedPathTraversalDuringReload() {
         InMemoryCoursewareProjectRepository repository = new InMemoryCoursewareProjectRepository();
         Instant now = Instant.now();

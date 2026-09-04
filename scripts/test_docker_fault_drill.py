@@ -31,7 +31,9 @@ class DockerFaultDrillTest(unittest.TestCase):
             waits.append((url, expected))
             return 503 if expected == {503} else 200
 
-        authenticated = mock.Mock(side_effect=[200, 200, 503, 200])
+        authenticated = mock.Mock(side_effect=[
+            (200, b"voices"), (200, b"voices"), (503, b"down"), (200, b"voices")
+        ])
         bad_logins = mock.Mock(
             side_effect=[401, 401, 401, 401, 401, 429]
         )
@@ -40,8 +42,10 @@ class DockerFaultDrillTest(unittest.TestCase):
                                   return_value=("user", "password", "token")), \
                 mock.patch.object(docker_fault_drill, "login_token",
                                   return_value="recovered-token"), \
-                mock.patch.object(docker_fault_drill, "authenticated_status",
+                mock.patch.object(docker_fault_drill, "authenticated_result",
                                   authenticated), \
+                mock.patch.object(docker_fault_drill, "prometheus_metrics",
+                                  return_value={"jvm_threads_live_threads": 10}), \
                 mock.patch.object(docker_fault_drill, "status", bad_logins), \
                 mock.patch.object(docker_fault_drill, "compose") as compose:
             report = docker_fault_drill.run(args)
@@ -58,8 +62,14 @@ class DockerFaultDrillTest(unittest.TestCase):
         self.assertEqual([401, 401, 401, 401, 401, 429],
                          redis["fallbackLoginStatuses"])
         self.assertEqual(200, redis["recoveredVoiceApi"])
+        self.assertFalse(redis["backendRestartRequired"])
+        self.assertEqual(
+            docker_fault_drill.payload_sha256(b"voices"),
+            redis["voicePayloadSha256"],
+        )
         self.assertEqual(503, mysql["dbApiDuringFault"])
         self.assertEqual(200, mysql["recoveredVoiceApi"])
+        self.assertFalse(mysql["backendRestartRequired"])
         self.assertIn(
             ("http://management.test/actuator/health/redis", {503}), waits
         )
