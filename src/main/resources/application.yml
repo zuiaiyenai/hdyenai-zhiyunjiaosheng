@@ -137,6 +137,7 @@ management:
   endpoint:
     health:
       show-details: never
+      show-components: always
       probes:
         enabled: true
       validate-group-membership: false
