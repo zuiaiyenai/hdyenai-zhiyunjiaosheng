@@ -26,3 +26,5 @@ ppt-fixture-slide-01.png
 deploy/nginx/logs/
 deploy/nginx/temp/
 deploy/backups/
+backups/
+deploy/nginx/conf/*.bak-*
