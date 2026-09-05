@@ -106,6 +106,36 @@ class VoiceLibrarySecurityTest {
     }
 
     @Test
+    void previewRelocatesPublicLegacyPaths() throws Exception {
+        byte[] content = TestMediaFiles.wav();
+        Path relocated = Files.write(uploadRoot.resolve("library-female-calm.mp3"), content);
+        Path previousProject = uploadRoot.resolveSibling("previous-project");
+        Voice voice = privateVoice(13, "system",
+                previousProject.resolve("uploads/voice_samples").resolve(relocated.getFileName())
+                        .toAbsolutePath().toString());
+        voice.setPublicVisible(true);
+        VoiceService service = mock(VoiceService.class);
+        VoiceController controller = new VoiceController();
+        ReflectionTestUtils.setField(controller, "voiceService", service);
+        ReflectionTestUtils.setField(controller, "uploadDir", uploadRoot.toString());
+        when(service.findById(13)).thenReturn(voice);
+
+        ResponseEntity<byte[]> response = controller.preview(13, requestFor("alice"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertArrayEquals(content, response.getBody());
+
+        voice.setFilePath("uploads/voice_samples/" + relocated.getFileName());
+        response = controller.preview(13, requestFor("alice"));
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertArrayEquals(content, response.getBody());
+
+        voice.setPublicVisible(false);
+        assertEquals(HttpStatus.NOT_FOUND,
+                controller.preview(13, requestFor("system")).getStatusCode());
+    }
+
+    @Test
     void databaseDeleteNeverDeletesOutsideUploadRoot() throws Exception {
         Path nestedRoot = Files.createDirectory(uploadRoot.resolve("voices"));
         Path outside = Files.write(uploadRoot.resolve("protected.wav"), new byte[]{5});

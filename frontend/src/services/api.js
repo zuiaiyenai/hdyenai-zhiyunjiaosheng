@@ -1,7 +1,10 @@
 import { reactive } from 'vue'
 
+const defaultBaseUrl = import.meta.env.VITE_API_BASE_URL
+  || (import.meta.env.DEV ? 'http://localhost:8081' : '/api')
+
 export const connection = reactive({
-  baseUrl: localStorage.getItem('zyjs_api') || 'http://localhost:8081',
+  baseUrl: localStorage.getItem('zyjs_api') || defaultBaseUrl,
   token: localStorage.getItem('token') || '',
   username: localStorage.getItem('username') || '访客'
 })

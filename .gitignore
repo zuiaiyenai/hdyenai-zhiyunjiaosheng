@@ -23,3 +23,6 @@ frontend/dist/
 
 # Local verification fixtures
 ppt-fixture-slide-01.png
+deploy/nginx/logs/
+deploy/nginx/temp/
+deploy/backups/

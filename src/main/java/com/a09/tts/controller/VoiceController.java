@@ -136,7 +136,7 @@ public class VoiceController {
         Path path;
         byte[] audio;
         try {
-            path = UploadUtils.resolveWithin(Path.of(uploadDir), voice.getFilePath());
+            path = resolveVoicePath(voice);
             if (!Files.isRegularFile(path)) {
                 return ResponseEntity.notFound().build();
             }
@@ -151,6 +151,36 @@ public class VoiceController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.inline().filename(path.getFileName().toString()).build().toString())
                 .body(audio);
+    }
+
+    private Path resolveVoicePath(Voice voice) {
+        Path root = Path.of(uploadDir);
+        try {
+            Path current = UploadUtils.resolveWithin(root, voice.getFilePath());
+            if (Files.isRegularFile(current)) {
+                return current;
+            }
+        } catch (IllegalArgumentException exception) {
+            if (!Boolean.TRUE.equals(voice.getPublicVisible())) {
+                throw exception;
+            }
+        }
+        if (!Boolean.TRUE.equals(voice.getPublicVisible())) {
+            throw new IllegalArgumentException("声音文件不存在");
+        }
+        String portablePath = voice.getFilePath().replace('\\', '/');
+        String legacyPrefix = "uploads/voice_samples/";
+        int prefixIndex = portablePath.lastIndexOf(legacyPrefix);
+        if (prefixIndex < 0) {
+            throw new IllegalArgumentException("声音文件不存在");
+        }
+        Path relocated = UploadUtils.resolveWithin(root,
+                portablePath.substring(prefixIndex + legacyPrefix.length()));
+        if (!Files.isRegularFile(relocated)) {
+            throw new IllegalArgumentException("声音文件不存在");
+        }
+        log.info("兼容旧版公开声音路径，voiceId={}", voice.getVoiceId());
+        return relocated;
     }
 
     private boolean canManage(Voice voice, HttpServletRequest request) {
