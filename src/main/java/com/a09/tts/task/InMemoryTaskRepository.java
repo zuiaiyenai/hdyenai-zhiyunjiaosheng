@@ -17,7 +17,8 @@ public class InMemoryTaskRepository implements TaskRepository {
     private final ConcurrentHashMap<String, TaskRecord> tasks = new ConcurrentHashMap<>();
 
     @Override
-    public synchronized CreateResult create(TaskRecord task, int perUserConcurrency) {
+    public synchronized CreateResult create(
+            TaskRecord task, int perUserConcurrency, int globalQueueLimit) {
         if (task.deduplicationKey() != null) {
             TaskRecord existing = tasks.values().stream()
                     .filter(candidate -> candidate.owner().equals(task.owner()))
@@ -29,12 +30,18 @@ public class InMemoryTaskRepository implements TaskRepository {
                 return CreateResult.duplicate(existing);
             }
         }
+        long globalActive = tasks.values().stream()
+                .filter(candidate -> !candidate.status().terminal())
+                .count();
+        if (globalActive >= globalQueueLimit) {
+            return CreateResult.globalCapacityExceeded();
+        }
         long active = tasks.values().stream()
                 .filter(candidate -> candidate.owner().equals(task.owner()))
                 .filter(candidate -> !candidate.status().terminal())
                 .count();
         if (active >= perUserConcurrency) {
-            return CreateResult.capacityExceeded();
+            return CreateResult.userCapacityExceeded();
         }
         tasks.put(task.id(), task);
         return CreateResult.created(task);

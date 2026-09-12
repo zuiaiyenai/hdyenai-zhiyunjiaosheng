@@ -151,6 +151,37 @@ class AsyncTaskServiceTest {
     }
 
     @Test
+    void rejectsGlobalCapacityWithStableCodeRetryAfterAndMetric() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        TaskDispatcher dispatcher = dispatcher(task -> {
+            started.countDown();
+            release.await();
+            return "done";
+        });
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(2), Duration.ofMillis(10), 2,
+                1, registry);
+        try {
+            service.submit("alice", "BLOCK", null, Map.of("id", 1), 1);
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+
+            TaskCapacityException rejected = assertThrows(TaskCapacityException.class,
+                    () -> service.submit("bob", "OTHER", null, Map.of("id", 2), 1));
+
+            assertEquals("TASK_GLOBAL_CAPACITY_EXCEEDED", rejected.errorCode());
+            assertEquals(Duration.ofSeconds(1), rejected.retryAfter());
+            assertEquals(1, registry.get("fctts.task.admission.rejected")
+                    .tag("reason", "global_capacity").counter().count());
+        } finally {
+            release.countDown();
+            service.shutdown();
+        }
+    }
+
+    @Test
     void enforcesTimeoutCancellationDeduplicationAndUserCapacity() throws Exception {
         InMemoryTaskRepository repository = new InMemoryTaskRepository();
         CountDownLatch blockerStarted = new CountDownLatch(1);
@@ -345,10 +376,19 @@ class AsyncTaskServiceTest {
             InMemoryTaskRepository repository, TaskDispatcher dispatcher,
             int workers, Duration timeout, Duration retryBase,
             int perUser, SimpleMeterRegistry registry) {
+        return service(repository, dispatcher, workers, timeout, retryBase,
+                perUser, 100, registry);
+    }
+
+    private AsyncTaskService service(
+            InMemoryTaskRepository repository, TaskDispatcher dispatcher,
+            int workers, Duration timeout, Duration retryBase,
+            int perUser, int globalQueueLimit, SimpleMeterRegistry registry) {
         return new AsyncTaskService(repository, dispatcher, new ObjectMapper(), workers,
                 Duration.ofMillis(5), timeout, Duration.ofMillis(20),
                 Duration.ofMillis(100), Duration.ofMillis(20), retryBase,
-                Duration.ofMillis(100), Duration.ofSeconds(1), perUser, registry);
+                Duration.ofMillis(100), Duration.ofSeconds(1), perUser,
+                globalQueueLimit, Duration.ofSeconds(1), registry);
     }
 
     private TaskDispatcher dispatcher(CheckedExecution execution) {

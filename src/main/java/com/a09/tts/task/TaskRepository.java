@@ -5,7 +5,11 @@ import java.util.List;
 import java.util.Optional;
 
 public interface TaskRepository {
-    CreateResult create(TaskRecord task, int perUserConcurrency);
+    default CreateResult create(TaskRecord task, int perUserConcurrency) {
+        return create(task, perUserConcurrency, Integer.MAX_VALUE);
+    }
+
+    CreateResult create(TaskRecord task, int perUserConcurrency, int globalQueueLimit);
 
     Optional<TaskRecord> findById(String id);
 
@@ -45,7 +49,8 @@ public interface TaskRepository {
     enum CreateDisposition {
         CREATED,
         DUPLICATE,
-        CAPACITY_EXCEEDED
+        USER_CAPACITY_EXCEEDED,
+        GLOBAL_CAPACITY_EXCEEDED
     }
 
     record CreateResult(CreateDisposition disposition, TaskRecord task) {
@@ -57,8 +62,12 @@ public interface TaskRepository {
             return new CreateResult(CreateDisposition.DUPLICATE, task);
         }
 
-        public static CreateResult capacityExceeded() {
-            return new CreateResult(CreateDisposition.CAPACITY_EXCEEDED, null);
+        public static CreateResult userCapacityExceeded() {
+            return new CreateResult(CreateDisposition.USER_CAPACITY_EXCEEDED, null);
+        }
+
+        public static CreateResult globalCapacityExceeded() {
+            return new CreateResult(CreateDisposition.GLOBAL_CAPACITY_EXCEEDED, null);
         }
     }
 

@@ -6,6 +6,7 @@ import com.a09.tts.api.ResourceNotFoundException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.binder.jvm.ExecutorServiceMetrics;
 import jakarta.annotation.PreDestroy;
@@ -46,6 +47,10 @@ public class AsyncTaskService {
     private final Duration retryMaxDelay;
     private final Duration shutdownGrace;
     private final int perUserConcurrency;
+    private final int globalQueueLimit;
+    private final Duration admissionRetryAfter;
+    private final Counter globalCapacityRejected;
+    private final Counter userCapacityRejected;
     private final String instanceId = UUID.randomUUID().toString();
     private final AtomicBoolean accepting = new AtomicBoolean(true);
     private final Map<String, Thread> runningThreads = new ConcurrentHashMap<>();
@@ -65,10 +70,12 @@ public class AsyncTaskService {
             @Value("${app.tasks.retry-max-delay:1m}") Duration retryMaxDelay,
             @Value("${app.tasks.shutdown-grace:10s}") Duration shutdownGrace,
             @Value("${app.tasks.per-user-concurrency:2}") int perUserConcurrency,
+            @Value("${app.tasks.global-queue-limit:200}") int globalQueueLimit,
+            @Value("${app.tasks.admission-retry-after:5s}") Duration admissionRetryAfter,
             MeterRegistry meterRegistry) {
         validate(workerCount, pollInterval, timeout, heartbeatInterval, staleAfter,
                 recoveryInterval, retryBaseDelay, retryMaxDelay, shutdownGrace,
-                perUserConcurrency);
+                perUserConcurrency, globalQueueLimit, admissionRetryAfter);
         this.repository = repository;
         this.dispatcher = dispatcher;
         this.objectMapper = objectMapper;
@@ -80,6 +87,12 @@ public class AsyncTaskService {
         this.retryMaxDelay = retryMaxDelay;
         this.shutdownGrace = shutdownGrace;
         this.perUserConcurrency = perUserConcurrency;
+        this.globalQueueLimit = globalQueueLimit;
+        this.admissionRetryAfter = admissionRetryAfter;
+        this.globalCapacityRejected = meterRegistry.counter(
+                "fctts.task.admission.rejected", "reason", "global_capacity");
+        this.userCapacityRejected = meterRegistry.counter(
+                "fctts.task.admission.rejected", "reason", "user_capacity");
 
         AtomicInteger workerNumber = new AtomicInteger();
         ThreadFactory workerFactory = runnable -> daemon(
@@ -106,7 +119,8 @@ public class AsyncTaskService {
             String owner, String type, String deduplicationKey,
             Object payload, int maxAttempts) {
         if (!accepting.get()) {
-            throw new TaskCapacityException("任务服务正在关闭，请稍后重试");
+            throw new TaskCapacityException("TASK_SERVICE_SHUTTING_DOWN",
+                    "任务服务正在关闭，请稍后重试", admissionRetryAfter);
         }
         String normalizedOwner = normalizeOwner(owner);
         String normalizedType = requireValue(type, "任务类型不能为空");
@@ -131,12 +145,20 @@ public class AsyncTaskService {
         TaskRecord task = new TaskRecord(id, normalizedOwner, normalizedType,
                 TaskStatus.PENDING, 0, payloadJson, null, null, null, dedupKey,
                 0, maxAttempts, createdAt, createdAt, null, null, null, null, 0);
-        TaskRepository.CreateResult created = repository.create(task, perUserConcurrency);
+        TaskRepository.CreateResult created = repository.create(
+                task, perUserConcurrency, globalQueueLimit);
         if (created.disposition() == TaskRepository.CreateDisposition.DUPLICATE) {
             return new TaskSubmission(created.task().id(), true);
         }
-        if (created.disposition() == TaskRepository.CreateDisposition.CAPACITY_EXCEEDED) {
-            throw new TaskCapacityException("当前用户活动任务过多，请稍后重试");
+        if (created.disposition() == TaskRepository.CreateDisposition.GLOBAL_CAPACITY_EXCEEDED) {
+            globalCapacityRejected.increment();
+            throw new TaskCapacityException("TASK_GLOBAL_CAPACITY_EXCEEDED",
+                    "系统活动任务已达到上限，请稍后重试", admissionRetryAfter);
+        }
+        if (created.disposition() == TaskRepository.CreateDisposition.USER_CAPACITY_EXCEEDED) {
+            userCapacityRejected.increment();
+            throw new TaskCapacityException("TASK_USER_CAPACITY_EXCEEDED",
+                    "当前用户活动任务过多，请稍后重试", admissionRetryAfter);
         }
         return new TaskSubmission(id, false);
     }
@@ -301,11 +323,11 @@ public class AsyncTaskService {
             int workerCount, Duration poll, Duration taskTimeout,
             Duration heartbeat, Duration stale, Duration recovery,
             Duration retryBase, Duration retryMax, Duration grace,
-            int userConcurrency) {
-        if (workerCount < 1 || userConcurrency < 1
+            int userConcurrency, int queueLimit, Duration retryAfter) {
+        if (workerCount < 1 || userConcurrency < 1 || queueLimit < 1
                 || invalid(poll) || invalid(taskTimeout) || invalid(heartbeat)
                 || invalid(stale) || invalid(recovery) || invalid(retryBase)
-                || invalid(retryMax) || invalid(grace)
+                || invalid(retryMax) || invalid(grace) || invalid(retryAfter)
                 || stale.compareTo(heartbeat) <= 0
                 || retryMax.compareTo(retryBase) < 0) {
             throw new IllegalArgumentException("持久化任务 worker 配置无效");
@@ -367,8 +389,21 @@ public class AsyncTaskService {
     }
 
     public static class TaskCapacityException extends RuntimeException {
-        public TaskCapacityException(String message) {
+        private final String errorCode;
+        private final Duration retryAfter;
+
+        public TaskCapacityException(String errorCode, String message, Duration retryAfter) {
             super(message);
+            this.errorCode = errorCode;
+            this.retryAfter = retryAfter;
+        }
+
+        public String errorCode() {
+            return errorCode;
+        }
+
+        public Duration retryAfter() {
+            return retryAfter;
         }
     }
 }

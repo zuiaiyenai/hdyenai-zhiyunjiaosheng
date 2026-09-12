@@ -57,6 +57,7 @@ class MediaTaskServiceTest {
                 Duration.ofMillis(5), Duration.ofSeconds(5), Duration.ofMillis(20),
                 Duration.ofMillis(100), Duration.ofMillis(20), Duration.ofMillis(10),
                 Duration.ofMillis(100), Duration.ofSeconds(1), 2,
+                100, Duration.ofSeconds(1),
                 new SimpleMeterRegistry());
         MediaTaskService service = new MediaTaskService(
                 tasks, storage, new UploadSecurityService());

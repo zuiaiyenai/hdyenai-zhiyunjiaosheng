@@ -81,7 +81,7 @@ class CoursewarePersistenceMySqlIntegrationTest {
                     "courseware/owner/project/source.pptx", "bob").isPresent());
             objects.delete("courseware/owner/project/source.pptx", "alice");
             assertEquals(0, objects.sumSizeByOwner("alice"));
-            assertEquals(9, jdbc.queryForObject(
+            assertEquals(10, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
         } finally {
             flyway.clean();

@@ -43,8 +43,27 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
-    public CreateResult create(TaskRecord task, int perUserConcurrency) {
+    public CreateResult create(
+            TaskRecord task, int perUserConcurrency, int globalQueueLimit) {
         CreateResult result = transactionTemplate.execute(status -> {
+            jdbcTemplate.queryForObject("""
+                    SELECT lock_id FROM async_task_admission_lock
+                    WHERE lock_id = 1 FOR UPDATE
+                    """, Integer.class);
+            if (task.deduplicationKey() != null) {
+                TaskRecord existing = findActiveByDeduplication(
+                        task.owner(), task.type(), task.deduplicationKey()).orElse(null);
+                if (existing != null) {
+                    return CreateResult.duplicate(existing);
+                }
+            }
+            Integer active = jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM async_task
+                    WHERE status IN ('PENDING', 'RUNNING')
+                    """, Integer.class);
+            if (active != null && active >= globalQueueLimit) {
+                return CreateResult.globalCapacityExceeded();
+            }
             try {
                 insert(task);
             } catch (DuplicateKeyException exception) {
@@ -60,7 +79,7 @@ public class JdbcTaskRepository implements TaskRepository {
             }
             if (!reserveUserSlot(task.owner(), task.id(), perUserConcurrency)) {
                 status.setRollbackOnly();
-                return CreateResult.capacityExceeded();
+                return CreateResult.userCapacityExceeded();
             }
             return CreateResult.created(task);
         });

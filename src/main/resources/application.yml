@@ -61,6 +61,8 @@ app:
     retry-max-delay: "${TASK_RETRY_MAX_DELAY:1m}"
     shutdown-grace: "${TASK_SHUTDOWN_GRACE:10s}"
     per-user-concurrency: "${TASK_PER_USER_CONCURRENCY:2}"
+    global-queue-limit: "${TASK_GLOBAL_QUEUE_LIMIT:200}"
+    admission-retry-after: "${TASK_ADMISSION_RETRY_AFTER:5s}"
   media:
     process-timeout: "${MEDIA_PROCESS_TIMEOUT:10m}"
   resources:

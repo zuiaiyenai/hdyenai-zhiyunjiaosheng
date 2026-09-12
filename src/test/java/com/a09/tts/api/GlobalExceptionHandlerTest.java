@@ -20,8 +20,12 @@ class GlobalExceptionHandlerTest {
                 HttpStatus.FORBIDDEN, "ACCESS_DENIED", "无权执行此操作");
         assertError(handler.notFound(new ResourceNotFoundException("资源不存在")),
                 HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "资源不存在");
-        assertError(handler.taskCapacity(new TaskCapacityException("队列已满")),
-                HttpStatus.TOO_MANY_REQUESTS, "TASK_CAPACITY_EXCEEDED", "队列已满");
+        var capacity = handler.taskCapacity(new TaskCapacityException(
+                "TASK_GLOBAL_CAPACITY_EXCEEDED", "队列已满",
+                java.time.Duration.ofMillis(2_500)));
+        assertError(capacity, HttpStatus.TOO_MANY_REQUESTS,
+                "TASK_GLOBAL_CAPACITY_EXCEEDED", "队列已满");
+        assertEquals("3", capacity.getHeaders().getFirst("Retry-After"));
     }
 
     @Test

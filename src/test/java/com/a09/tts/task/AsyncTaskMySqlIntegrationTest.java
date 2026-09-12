@@ -50,19 +50,22 @@ class AsyncTaskMySqlIntegrationTest {
             assertEquals(2, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM async_task WHERE task_id LIKE 'legacy-%' AND status = 'FAILED'",
                     Integer.class));
-            assertEquals(9, jdbc.queryForObject(
+            assertEquals(10, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
 
             JdbcTaskRepository first = repository(url, username, password);
             JdbcTaskRepository second = repository(url, username, password);
             verifyConcurrentDeduplication(first, second);
             verifyPerUserCapacity(first, second);
+            verifyGlobalCapacity(first, second);
             verifyAtomicTransitions(first, second);
             verifyFractionalAvailability(first);
             verifyWorkerClaimRetryAndStaleRecovery(first, second, jdbc);
 
             assertEquals(0, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM async_task_user_slot", Integer.class));
+            assertEquals(1, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM async_task_admission_lock", Integer.class));
         } finally {
             Flyway.configure()
                     .dataSource(url, username, password)
@@ -105,12 +108,34 @@ class AsyncTaskMySqlIntegrationTest {
                 .count());
         assertEquals(1, results.stream()
                 .filter(result -> result.disposition()
-                        == TaskRepository.CreateDisposition.CAPACITY_EXCEEDED)
+                        == TaskRepository.CreateDisposition.USER_CAPACITY_EXCEEDED)
                 .count());
         TaskRecord created = results.stream()
                 .filter(result -> result.disposition() == TaskRepository.CreateDisposition.CREATED)
                 .findFirst().orElseThrow().task();
         assertTrue(second.markFailed(created.id(), "test cleanup", Instant.now()));
+    }
+
+    private void verifyGlobalCapacity(
+            JdbcTaskRepository first, JdbcTaskRepository second) throws Exception {
+        Instant now = Instant.now();
+        List<TaskRepository.CreateResult> results = race(
+                () -> first.create(task(UUID.randomUUID().toString(),
+                        "global-a", "VIDEO", null, now), 2, 1),
+                () -> second.create(task(UUID.randomUUID().toString(),
+                        "global-b", "ASR", null, now), 2, 1));
+
+        assertEquals(1, results.stream()
+                .filter(result -> result.disposition() == TaskRepository.CreateDisposition.CREATED)
+                .count());
+        assertEquals(1, results.stream()
+                .filter(result -> result.disposition()
+                        == TaskRepository.CreateDisposition.GLOBAL_CAPACITY_EXCEEDED)
+                .count());
+        TaskRecord created = results.stream()
+                .filter(result -> result.disposition() == TaskRepository.CreateDisposition.CREATED)
+                .findFirst().orElseThrow().task();
+        assertTrue(first.markFailed(created.id(), "test cleanup", Instant.now()));
     }
 
     private void verifyAtomicTransitions(
@@ -282,10 +307,11 @@ class AsyncTaskMySqlIntegrationTest {
     private void requireDedicatedVerificationSchema(String url) {
         String withoutQuery = url.replaceFirst("\\?.*$", "");
         String schema = withoutQuery.substring(withoutQuery.lastIndexOf('/') + 1);
-        if (!schema.matches("tts_phase(?:5_worker|6_resource)_verify_[a-zA-Z0-9_]+")) {
+        if (!schema.matches("tts_phase(?:5_worker|6_resource|9_backpressure)_verify_[a-zA-Z0-9_]+")) {
             throw new IllegalArgumentException(
                     "MYSQL_INTEGRATION_URL must target a dedicated "
-                            + "tts_phase5_worker_verify_* or tts_phase6_resource_verify_* schema");
+                            + "tts_phase5_worker_verify_*, tts_phase6_resource_verify_* "
+                            + "or tts_phase9_backpressure_verify_* schema");
         }
     }
 }

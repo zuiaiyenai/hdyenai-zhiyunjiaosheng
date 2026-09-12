@@ -52,8 +52,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(TaskCapacityException.class)
     ResponseEntity<ApiError> taskCapacity(TaskCapacityException exception) {
+        long retryAfterSeconds = Math.max(1,
+                (exception.retryAfter().toMillis() + 999) / 1_000);
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .body(ApiError.of(429, "TASK_CAPACITY_EXCEEDED", exception.getMessage()));
+                .header("Retry-After", Long.toString(retryAfterSeconds))
+                .body(ApiError.of(429, exception.errorCode(), exception.getMessage()));
     }
 
     @ExceptionHandler(ServiceUnavailableException.class)
