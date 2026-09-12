@@ -6,6 +6,7 @@ import com.a09.tts.api.ResourceNotFoundException;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.service.ASRService;
 import com.a09.tts.service.AccessibilityService;
+import com.a09.tts.service.CoursewareProjectService;
 import com.a09.tts.service.PPTService;
 import com.a09.tts.service.SoundCloneService;
 import com.a09.tts.service.SpeakingPracticeService;
@@ -13,7 +14,6 @@ import com.a09.tts.service.VideoVoiceSwapService;
 import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
 import com.a09.tts.storage.LocalObjectStorageService;
 import com.a09.tts.storage.ManagedObjectStorageService;
-import com.a09.tts.storage.ObjectStorageKeys;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -37,29 +37,36 @@ class MediaTaskServiceTest {
 
     @Test
     void stagesInputRunsAsrStoresResultAndCleansInput() throws Exception {
-        AsyncTaskService tasks = new AsyncTaskService(
-                new InMemoryTaskRepository(), 1, 1, 2,
-                Duration.ofSeconds(5), 2, new SimpleMeterRegistry());
         ManagedObjectStorageService storage = new ManagedObjectStorageService(
                 new LocalObjectStorageService(root.toString()),
                 new InMemoryStoredObjectMetadataRepository());
+        ObjectMapper objectMapper = new ObjectMapper();
         ASRService asr = mock(ASRService.class);
         when(asr.transcribeDetailed(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.eq("zh")))
                 .thenReturn(new AsrResult("测试转写", null, null, null, List.of()));
-        MediaTaskService service = new MediaTaskService(
-                tasks, storage, new UploadSecurityService(), asr,
+        TaskWorkDispatcher dispatcher = new TaskWorkDispatcher(
+                storage, asr,
                 mock(AccessibilityService.class),
                 mock(VideoVoiceSwapService.class), mock(SoundCloneService.class),
                 mock(SpeakingPracticeService.class), mock(PPTService.class),
-                new ObjectMapper());
+                mock(CoursewareProjectService.class), objectMapper);
+        AsyncTaskService tasks = new AsyncTaskService(
+                new InMemoryTaskRepository(), dispatcher, objectMapper, 1,
+                Duration.ofMillis(5), Duration.ofSeconds(5), Duration.ofMillis(20),
+                Duration.ofMillis(100), Duration.ofMillis(20), Duration.ofMillis(10),
+                Duration.ofMillis(100), Duration.ofSeconds(1), 2,
+                new SimpleMeterRegistry());
+        MediaTaskService service = new MediaTaskService(
+                tasks, storage, new UploadSecurityService());
         try {
             MockMultipartFile audio = new MockMultipartFile(
                     "file", "sample.wav", "audio/wav", TestMediaFiles.wav());
             AsyncTaskService.TaskSubmission submission =
                     service.submitAsr(audio, "zh", "alice");
             TaskRecord task = awaitTerminal(tasks, submission.taskId());
-            String inputKey = ObjectStorageKeys.sibling(task.resultData(), "input.wav");
+            String inputKey = objectMapper.readValue(
+                    task.payload(), TaskPayloads.Asr.class).objectKey();
 
             try (var input = storage.open("alice", task.resultData())) {
                 String json = new String(input.readAllBytes(), StandardCharsets.UTF_8);

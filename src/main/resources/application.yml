@@ -51,10 +51,15 @@ app:
   cleanup:
     retry-delay: "${FILE_CLEANUP_RETRY_DELAY:5m}"
   tasks:
-    core-pool-size: "${TASK_CORE_POOL_SIZE:2}"
-    max-pool-size: "${TASK_MAX_POOL_SIZE:4}"
-    queue-capacity: "${TASK_QUEUE_CAPACITY:20}"
+    worker-count: "${TASK_WORKER_COUNT:2}"
+    poll-interval: "${TASK_POLL_INTERVAL:250ms}"
     timeout: "${TASK_TIMEOUT:15m}"
+    heartbeat-interval: "${TASK_HEARTBEAT_INTERVAL:10s}"
+    stale-after: "${TASK_STALE_AFTER:45s}"
+    recovery-interval: "${TASK_RECOVERY_INTERVAL:15s}"
+    retry-base-delay: "${TASK_RETRY_BASE_DELAY:2s}"
+    retry-max-delay: "${TASK_RETRY_MAX_DELAY:1m}"
+    shutdown-grace: "${TASK_SHUTDOWN_GRACE:10s}"
     per-user-concurrency: "${TASK_PER_USER_CONCURRENCY:2}"
   media:
     process-timeout: "${MEDIA_PROCESS_TIMEOUT:10m}"

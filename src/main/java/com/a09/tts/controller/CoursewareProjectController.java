@@ -6,6 +6,7 @@ import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
 import com.a09.tts.task.AsyncTaskService;
 import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import com.a09.tts.task.TaskPayloads;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -49,7 +50,7 @@ public class CoursewareProjectController {
         ProjectView project = projectService.prepare(file, owner);
         try {
             return submit(() -> taskService.submit(owner, "COURSEWARE_CREATE", project.id(),
-                    () -> projectService.processPrepared(project.id(), owner).id()));
+                    new TaskPayloads.CoursewareCreate(project.id()), 1));
         } catch (RuntimeException exception) {
             projectService.failPreparedSubmission(project.id(), owner, "课件生成任务提交失败");
             throw exception;
@@ -105,7 +106,7 @@ public class CoursewareProjectController {
         return submit(() -> taskService.submit(owner, "COURSEWARE_OPTIMIZE",
                 id + ":" + project.revision() + ":"
                         + Integer.toHexString(java.util.Objects.hashCode(body.instruction())),
-                () -> projectService.optimize(id, owner, body.instruction()).id()));
+                new TaskPayloads.CoursewareOptimize(id, body.instruction()), 1));
     }
 
     @PostMapping("/{id}/audio/tasks")
@@ -119,8 +120,8 @@ public class CoursewareProjectController {
         return submit(() -> taskService.submit(owner, "COURSEWARE_AUDIO",
                 id + ":" + project.revision() + ":" + body.voice()
                         + ":" + speed + ":" + pitch + ":" + rhythm,
-                () -> projectService.generateAudio(
-                        id, owner, body.voice(), speed, pitch, rhythm).id()));
+                new TaskPayloads.CoursewareAudio(
+                        id, body.voice(), speed, pitch, rhythm), 1));
     }
 
     @PostMapping("/{id}/video/tasks")
@@ -129,7 +130,7 @@ public class CoursewareProjectController {
         ProjectView project = projectService.get(id, owner);
         return submit(() -> taskService.submit(owner, "COURSEWARE_VIDEO",
                 id + ":" + project.revision(),
-                () -> projectService.generateVideo(id, owner).id()));
+                new TaskPayloads.CoursewareVideo(id), 1));
     }
 
     @GetMapping("/{id}/download/{artifact}")

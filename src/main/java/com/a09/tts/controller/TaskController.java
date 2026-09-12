@@ -89,8 +89,9 @@ public class TaskController {
 
     private TaskView view(TaskRecord task) {
         return new TaskView(task.id(), task.type(), task.status().name(), task.progress(),
-                task.resultData(), task.errorMessage(), task.createdAt(),
-                task.startedAt(), task.finishedAt());
+                task.attempts(), task.maxAttempts(), task.resultData(), task.errorCode(),
+                task.errorMessage(), task.availableAt(), task.createdAt(), task.startedAt(),
+                task.heartbeatAt(), task.finishedAt());
     }
 
     private String currentUsername() {
@@ -103,10 +104,15 @@ public class TaskController {
             String type,
             String status,
             int progress,
+            int attempts,
+            int maxAttempts,
             String resultData,
+            String errorCode,
             String errorMessage,
+            Instant availableAt,
             Instant createdAt,
             Instant startedAt,
+            Instant heartbeatAt,
             Instant finishedAt
     ) {
     }

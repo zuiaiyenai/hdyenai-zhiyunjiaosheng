@@ -4,241 +4,250 @@ import com.a09.tts.api.PageResult;
 import com.a09.tts.api.ResourceNotFoundException;
 import com.a09.tts.task.AsyncTaskService.TaskCapacityException;
 import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AsyncTaskServiceTest {
 
     @Test
-    void publishesExecutorActiveAndQueueMetrics() throws Exception {
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        AsyncTaskService service = new AsyncTaskService(
-                new InMemoryTaskRepository(), 1, 1, 2,
-                Duration.ofSeconds(5), 2, registry);
-        CountDownLatch running = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        try {
-            TaskSubmission first = service.submit("alice", "ONE", null, () -> {
-                running.countDown();
-                release.await();
-                return "one";
-            });
-            assertTrue(running.await(1, TimeUnit.SECONDS));
-            TaskSubmission second = service.submit("bob", "TWO", null, () -> "two");
-
-            assertEquals(1.0, registry.get("executor.active")
-                    .tag("name", "fctts.async.tasks").gauge().value());
-            assertEquals(1.0, registry.get("executor.queued")
-                    .tag("name", "fctts.async.tasks").gauge().value());
-
-            service.cancel(first.taskId(), "alice");
-            service.cancel(second.taskId(), "bob");
-        } finally {
-            release.countDown();
-            service.shutdown();
-        }
-    }
-
-    @Test
-    void completesFailsAndScopesTasksByOwner() throws Exception {
-        InMemoryTaskRepository repository = new InMemoryTaskRepository();
-        AsyncTaskService service = service(repository, 1, 1, 4, Duration.ofSeconds(2), 2);
-        try {
-            TaskSubmission success = service.submit("alice", "TEST", null, () -> "done");
-            assertEquals(TaskStatus.SUCCESS, awaitTerminal(service, success.taskId(), "alice").status());
-            assertEquals("done", service.get(success.taskId(), "alice").resultData());
-            assertThrows(ResourceNotFoundException.class,
-                    () -> service.get(success.taskId(), "bob"));
-            assertThrows(ResourceNotFoundException.class,
-                    () -> service.cancel(success.taskId(), "bob"));
-
-            TaskSubmission failed = service.submit("alice", "TEST", null,
-                    () -> {
-                        throw new IllegalStateException("expected failure");
-                    });
-            TaskRecord failure = awaitTerminal(service, failed.taskId(), "alice");
-            assertEquals(TaskStatus.FAILED, failure.status());
-            assertEquals("任务执行失败", failure.errorMessage());
-        } finally {
-            service.shutdown();
-        }
-    }
-
-    @Test
-    void timesOutAndCancelsTasks() throws Exception {
-        AsyncTaskService timeoutService = service(
-                new InMemoryTaskRepository(), 1, 1, 2, Duration.ofMillis(100), 2);
-        try {
-            TaskSubmission timed = timeoutService.submit("alice", "SLOW", null, () -> {
-                Thread.sleep(10_000);
-                return "late";
-            });
-            assertEquals(TaskStatus.TIMEOUT,
-                    awaitTerminal(timeoutService, timed.taskId(), "alice").status());
-        } finally {
-            timeoutService.shutdown();
-        }
-
-        AsyncTaskService cancelService = service(
-                new InMemoryTaskRepository(), 1, 1, 2, Duration.ofSeconds(5), 2);
-        CountDownLatch started = new CountDownLatch(1);
-        try {
-            TaskSubmission submitted = cancelService.submit("alice", "CANCEL", null, () -> {
-                started.countDown();
-                Thread.sleep(10_000);
-                return "late";
-            });
-            assertTrue(started.await(1, TimeUnit.SECONDS));
-            assertEquals(TaskStatus.CANCELLED,
-                    cancelService.cancel(submitted.taskId(), "alice").status());
-            assertEquals(TaskStatus.CANCELLED,
-                    cancelService.get(submitted.taskId(), "alice").status());
-        } finally {
-            cancelService.shutdown();
-        }
-    }
-
-    @Test
-    void cleansCancelledTasksOnlyAfterRunningWorkExits() throws Exception {
-        AsyncTaskService service = service(
-                new InMemoryTaskRepository(), 1, 1, 2, Duration.ofSeconds(5), 2);
-        CountDownLatch started = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch cleaned = new CountDownLatch(1);
-        AtomicInteger cleanupCalls = new AtomicInteger();
-        try {
-            TaskSubmission task = service.submit("alice", "MEDIA", null, () -> {
-                started.countDown();
-                boolean waiting = true;
-                while (waiting) {
-                    try {
-                        release.await();
-                        waiting = false;
-                    } catch (InterruptedException ignored) {
-                        // Simulate an external library that does not stop immediately on interrupt.
-                    }
-                }
-                return "late";
-            }, () -> {
-                cleanupCalls.incrementAndGet();
-                cleaned.countDown();
-            });
-            assertTrue(started.await(1, TimeUnit.SECONDS));
-
-            service.cancel(task.taskId(), "alice");
-
-            assertFalse(cleaned.await(100, TimeUnit.MILLISECONDS));
-            release.countDown();
-            assertTrue(cleaned.await(1, TimeUnit.SECONDS));
-            assertEquals(1, cleanupCalls.get());
-        } finally {
-            release.countDown();
-            service.shutdown();
-        }
-    }
-
-    @Test
-    void cleansCancelledQueuedTaskExactlyOnce() throws Exception {
-        AsyncTaskService service = service(
-                new InMemoryTaskRepository(), 1, 1, 2, Duration.ofSeconds(5), 2);
-        CountDownLatch running = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch cleaned = new CountDownLatch(1);
-        AtomicInteger cleanupCalls = new AtomicInteger();
-        try {
-            TaskSubmission blocker = service.submit("alice", "BLOCKER", null, () -> {
-                running.countDown();
-                release.await();
-                return "done";
-            });
-            assertTrue(running.await(1, TimeUnit.SECONDS));
-            TaskSubmission queued = service.submit("bob", "QUEUED", null, () -> "unused", () -> {
-                cleanupCalls.incrementAndGet();
-                cleaned.countDown();
-            });
-
-            service.cancel(queued.taskId(), "bob");
-
-            assertTrue(cleaned.await(1, TimeUnit.SECONDS));
-            assertEquals(1, cleanupCalls.get());
-            service.cancel(blocker.taskId(), "alice");
-        } finally {
-            release.countDown();
-            service.shutdown();
-        }
-    }
-
-    @Test
-    void enforcesQueueUserLimitAndDuplicateProtection() throws Exception {
-        AsyncTaskService perUser = service(
-                new InMemoryTaskRepository(), 1, 1, 2, Duration.ofSeconds(5), 1);
-        CountDownLatch blocker = new CountDownLatch(1);
-        try {
-            TaskSubmission first = perUser.submit("alice", "MEDIA", "same", () -> {
-                blocker.await();
-                return "done";
-            });
-            TaskSubmission duplicate = perUser.submit("alice", "MEDIA", "same", () -> "duplicate");
-            assertTrue(duplicate.duplicate());
-            assertEquals(first.taskId(), duplicate.taskId());
-            assertThrows(TaskCapacityException.class,
-                    () -> perUser.submit("alice", "OTHER", null, () -> "other"));
-            perUser.cancel(first.taskId(), "alice");
-        } finally {
-            blocker.countDown();
-            perUser.shutdown();
-        }
-
-        AsyncTaskService queue = service(
-                new InMemoryTaskRepository(), 1, 1, 1, Duration.ofSeconds(5), 3);
-        CountDownLatch running = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        try {
-            TaskSubmission first = queue.submit("alice", "ONE", null, () -> {
-                running.countDown();
-                release.await();
-                return "one";
-            });
-            assertTrue(running.await(1, TimeUnit.SECONDS));
-            TaskSubmission second = queue.submit("bob", "TWO", null, () -> "two");
-            assertThrows(TaskCapacityException.class,
-                    () -> queue.submit("carol", "THREE", null, () -> "three"));
-            queue.cancel(first.taskId(), "alice");
-            queue.cancel(second.taskId(), "bob");
-        } finally {
-            release.countDown();
-            queue.shutdown();
-        }
-    }
-
-    @Test
-    void leavesPersistedActiveTasksForDurableRecovery() {
+    void executesPersistedPayloadWithoutSubmissionCallback() throws Exception {
         InMemoryTaskRepository repository = new InMemoryTaskRepository();
         Instant now = Instant.now();
+        TaskRecord persisted = task("persisted", "alice", "RESTORED",
+                "{\"value\":\"from-db\"}", 1, now);
         assertEquals(TaskRepository.CreateDisposition.CREATED,
-                repository.create(new TaskRecord("old", "alice", "VIDEO", TaskStatus.PENDING,
-                        0, null, null, null, now, null, null), 1).disposition());
-        assertTrue(repository.markRunning("old", now));
-        AsyncTaskService service = service(
-                repository, 1, 1, 1, Duration.ofSeconds(1), 1);
+                repository.create(persisted, 2).disposition());
+        TaskDispatcher dispatcher = dispatcher(task ->
+                new ObjectMapper().readTree(task.payload()).path("value").asText());
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(2), Duration.ofMillis(10), 2,
+                new SimpleMeterRegistry());
         try {
-            TaskRecord recovered = repository.findById("old").orElseThrow();
-            assertEquals(TaskStatus.RUNNING, recovered.status());
+            TaskRecord completed = awaitTerminal(service, "persisted", "alice");
+            assertEquals(TaskStatus.SUCCESS, completed.status());
+            assertEquals("from-db", completed.resultData());
+            assertEquals(1, completed.attempts());
+            assertTrue(completed.workerId() == null);
         } finally {
-            repository.markFailed("old", "test cleanup", Instant.now());
             service.shutdown();
         }
+    }
+
+    @Test
+    void retriesWithBackoffThenSucceeds() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        AtomicInteger executions = new AtomicInteger();
+        TaskDispatcher dispatcher = dispatcher(task -> {
+            if (executions.incrementAndGet() < 3) {
+                throw new IllegalStateException("retry");
+            }
+            return "done";
+        });
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(2), Duration.ofMillis(20), 2,
+                new SimpleMeterRegistry());
+        try {
+            TaskSubmission submission = service.submit(
+                    "alice", "RETRY", null, Map.of("id", 1), 3);
+            TaskRecord completed = awaitTerminal(service, submission.taskId(), "alice");
+            assertEquals(TaskStatus.SUCCESS, completed.status());
+            assertEquals(3, completed.attempts());
+            assertEquals(3, executions.get());
+            assertTrue(completed.version() >= 6);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void recoversStaleClaimAndFailsExhaustedClaim() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        Instant now = Instant.now();
+        repository.create(task("retry-stale", "alice", "STALE", "{}", 2, now), 2);
+        repository.claimNext("dead-worker-1", now).orElseThrow();
+        repository.updateHeartbeat("retry-stale", "dead-worker-1", now.minusSeconds(5));
+        repository.create(task("failed-stale", "bob", "STALE", "{}", 1, now), 2);
+        repository.claimNext("dead-worker-2", now).orElseThrow();
+        repository.updateHeartbeat("failed-stale", "dead-worker-2", now.minusSeconds(5));
+        AtomicInteger cleaned = new AtomicInteger();
+        TaskDispatcher dispatcher = new TaskDispatcher() {
+            @Override
+            public String execute(TaskRecord task) {
+                return "recovered";
+            }
+
+            @Override
+            public void cleanup(TaskRecord task) {
+                if (task.status() == TaskStatus.FAILED) {
+                    cleaned.incrementAndGet();
+                }
+            }
+
+            @Override
+            public void cleanupUncommittedResult(TaskRecord task, String resultData) {
+            }
+        };
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(2), Duration.ofMillis(10), 2,
+                new SimpleMeterRegistry());
+        try {
+            TaskRecord recovered = awaitTerminal(service, "retry-stale", "alice");
+            TaskRecord failed = awaitTerminal(service, "failed-stale", "bob");
+            assertEquals(TaskStatus.SUCCESS, recovered.status());
+            assertEquals(2, recovered.attempts());
+            assertEquals(TaskStatus.FAILED, failed.status());
+            assertEquals("STALE_ATTEMPTS_EXHAUSTED", failed.errorCode());
+            assertEquals(1, cleaned.get());
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void claimsEachTaskOnceAcrossMultipleWorkerInstances() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        Map<String, AtomicInteger> executions = new ConcurrentHashMap<>();
+        TaskDispatcher dispatcher = dispatcher(task -> {
+            executions.computeIfAbsent(task.id(), ignored -> new AtomicInteger()).incrementAndGet();
+            Thread.sleep(5);
+            return task.id();
+        });
+        AsyncTaskService first = service(repository, dispatcher, 2,
+                Duration.ofSeconds(2), Duration.ofMillis(10), 30,
+                new SimpleMeterRegistry());
+        AsyncTaskService second = service(repository, dispatcher, 2,
+                Duration.ofSeconds(2), Duration.ofMillis(10), 30,
+                new SimpleMeterRegistry());
+        try {
+            List<TaskSubmission> submitted = new ArrayList<>();
+            for (int index = 0; index < 20; index++) {
+                submitted.add(first.submit("user-" + index, "MULTI", null,
+                        Map.of("index", index), 1));
+            }
+            for (int index = 0; index < submitted.size(); index++) {
+                awaitTerminal(first, submitted.get(index).taskId(), "user-" + index);
+            }
+            assertEquals(20, executions.size());
+            assertTrue(executions.values().stream().allMatch(value -> value.get() == 1));
+        } finally {
+            first.shutdown();
+            second.shutdown();
+        }
+    }
+
+    @Test
+    void enforcesTimeoutCancellationDeduplicationAndUserCapacity() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        CountDownLatch blockerStarted = new CountDownLatch(1);
+        CountDownLatch blockerRelease = new CountDownLatch(1);
+        AtomicInteger cleanupCalls = new AtomicInteger();
+        TaskDispatcher dispatcher = new TaskDispatcher() {
+            @Override
+            public String execute(TaskRecord task) throws Exception {
+                if (task.type().equals("TIMEOUT")) {
+                    Thread.sleep(10_000);
+                }
+                blockerStarted.countDown();
+                blockerRelease.await();
+                return "done";
+            }
+
+            @Override
+            public void cleanup(TaskRecord task) {
+                cleanupCalls.incrementAndGet();
+            }
+
+            @Override
+            public void cleanupUncommittedResult(TaskRecord task, String resultData) {
+            }
+        };
+        AsyncTaskService timeoutService = service(repository, dispatcher, 1,
+                Duration.ofMillis(100), Duration.ofMillis(10), 1,
+                new SimpleMeterRegistry());
+        try {
+            TaskSubmission timed = timeoutService.submit(
+                    "timeout-user", "TIMEOUT", null, Map.of("id", 1), 1);
+            assertEquals(TaskStatus.TIMEOUT,
+                    awaitTerminal(timeoutService, timed.taskId(), "timeout-user").status());
+
+            TaskSubmission blocker = timeoutService.submit(
+                    "alice", "BLOCK", "same", Map.of("id", 2), 1);
+            assertTrue(blockerStarted.await(1, TimeUnit.SECONDS));
+            TaskSubmission duplicate = timeoutService.submit(
+                    "alice", "BLOCK", "same", Map.of("id", 2), 1);
+            assertTrue(duplicate.duplicate());
+            assertEquals(blocker.taskId(), duplicate.taskId());
+            assertThrows(TaskCapacityException.class, () -> timeoutService.submit(
+                    "alice", "OTHER", null, Map.of("id", 3), 1));
+
+            TaskSubmission queued = timeoutService.submit(
+                    "bob", "QUEUED", null, Map.of("id", 4), 1);
+            assertEquals(TaskStatus.CANCELLED,
+                    timeoutService.cancel(queued.taskId(), "bob").status());
+            assertThrows(ResourceNotFoundException.class,
+                    () -> timeoutService.cancel(blocker.taskId(), "bob"));
+            timeoutService.cancel(blocker.taskId(), "alice");
+            blockerRelease.countDown();
+            assertTrue(awaitValue(cleanupCalls, 3));
+        } finally {
+            blockerRelease.countDown();
+            timeoutService.shutdown();
+        }
+    }
+
+    @Test
+    void gracefulShutdownRequeuesInterruptedWork() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        CountDownLatch started = new CountDownLatch(1);
+        TaskDispatcher dispatcher = dispatcher(task -> {
+            started.countDown();
+            Thread.sleep(10_000);
+            return "late";
+        });
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(20), Duration.ofMillis(10), 2,
+                new SimpleMeterRegistry());
+        TaskSubmission submitted = service.submit(
+                "alice", "SHUTDOWN", null, Map.of("id", 1), 2);
+        assertTrue(started.await(1, TimeUnit.SECONDS));
+
+        service.shutdown();
+
+        TaskRecord task = repository.findById(submitted.taskId()).orElseThrow();
+        assertEquals(TaskStatus.PENDING, task.status());
+        assertEquals("WORKER_SHUTDOWN", task.errorCode());
+        assertTrue(task.workerId() == null);
+    }
+
+    @Test
+    void releasesUnstartedClaimWithoutConsumingAnAttempt() {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        Instant now = Instant.now();
+        repository.create(task("unstarted", "alice", "SHUTDOWN", "{}", 1, now), 1);
+        TaskRecord claimed = repository.claimNext("stopping-worker", now).orElseThrow();
+        assertEquals(1, claimed.attempts());
+
+        assertTrue(repository.releaseClaim(claimed.id(), claimed.workerId(), now));
+
+        TaskRecord released = repository.findById(claimed.id()).orElseThrow();
+        assertEquals(TaskStatus.PENDING, released.status());
+        assertEquals(0, released.attempts());
+        assertTrue(released.workerId() == null);
     }
 
     @Test
@@ -248,8 +257,9 @@ class AsyncTaskServiceTest {
         completeTask(repository, "alice-1", "alice", now.minusSeconds(2));
         completeTask(repository, "bob-1", "bob", now.minusSeconds(1));
         completeTask(repository, "alice-2", "alice", now);
-        AsyncTaskService service = service(
-                repository, 1, 1, 1, Duration.ofSeconds(1), 1);
+        AsyncTaskService service = service(repository, dispatcher(task -> "unused"), 1,
+                Duration.ofSeconds(1), Duration.ofMillis(10), 2,
+                new SimpleMeterRegistry());
         try {
             PageResult<TaskRecord> first = service.list("alice", 0, 1);
             PageResult<TaskRecord> second = service.list("alice", 1, 1);
@@ -264,34 +274,76 @@ class AsyncTaskServiceTest {
         }
     }
 
+    private AsyncTaskService service(
+            InMemoryTaskRepository repository, TaskDispatcher dispatcher,
+            int workers, Duration timeout, Duration retryBase,
+            int perUser, SimpleMeterRegistry registry) {
+        return new AsyncTaskService(repository, dispatcher, new ObjectMapper(), workers,
+                Duration.ofMillis(5), timeout, Duration.ofMillis(20),
+                Duration.ofMillis(100), Duration.ofMillis(20), retryBase,
+                Duration.ofMillis(100), Duration.ofSeconds(1), perUser, registry);
+    }
+
+    private TaskDispatcher dispatcher(CheckedExecution execution) {
+        return new TaskDispatcher() {
+            @Override
+            public String execute(TaskRecord task) throws Exception {
+                return execution.execute(task);
+            }
+
+            @Override
+            public void cleanup(TaskRecord task) {
+            }
+
+            @Override
+            public void cleanupUncommittedResult(TaskRecord task, String resultData) {
+            }
+        };
+    }
+
+    private TaskRecord task(String id, String owner, String type,
+                            String payload, int maxAttempts, Instant createdAt) {
+        return new TaskRecord(id, owner, type, TaskStatus.PENDING, 0,
+                payload, null, null, null, null, 0, maxAttempts,
+                createdAt, createdAt, null, null, null, null, 0);
+    }
+
     private void completeTask(InMemoryTaskRepository repository, String id,
                               String owner, Instant createdAt) {
-        TaskRecord task = new TaskRecord(id, owner, "TEST", TaskStatus.PENDING,
-                0, null, null, null, createdAt, null, null);
+        TaskRecord task = task(id, owner, "TEST", "{}", 1, createdAt);
         assertEquals(TaskRepository.CreateDisposition.CREATED,
-                repository.create(task, 1).disposition());
+                repository.create(task, 2).disposition());
         assertTrue(repository.markRunning(id, createdAt));
         assertTrue(repository.markSucceeded(id, "done", createdAt));
     }
 
-    private AsyncTaskService service(InMemoryTaskRepository repository,
-                                     int core, int max, int queue,
-                                     Duration timeout, int perUser) {
-        return new AsyncTaskService(
-                repository, core, max, queue, timeout, perUser, new SimpleMeterRegistry());
-    }
-
     private TaskRecord awaitTerminal(AsyncTaskService service, String id, String owner)
             throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         TaskRecord task;
         do {
             task = service.get(id, owner);
             if (task.status().terminal()) {
                 return task;
             }
-            Thread.sleep(10);
+            Thread.sleep(5);
         } while (System.nanoTime() < deadline);
         throw new AssertionError("task did not become terminal: " + task);
+    }
+
+    private boolean awaitValue(AtomicInteger value, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (System.nanoTime() < deadline) {
+            if (value.get() >= expected) {
+                return true;
+            }
+            Thread.sleep(5);
+        }
+        return value.get() >= expected;
+    }
+
+    @FunctionalInterface
+    private interface CheckedExecution {
+        String execute(TaskRecord task) throws Exception;
     }
 }

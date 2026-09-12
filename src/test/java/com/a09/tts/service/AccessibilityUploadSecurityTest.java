@@ -63,10 +63,9 @@ class AccessibilityUploadSecurityTest {
         storage.storeBytes("alice", inputKey, TestMediaFiles.wav(), "audio/wav");
 
         Map<String, Object> note = service.saveVoiceNoteFromObject(
-                inputKey, "note.wav", "Async note", "alice");
+                inputKey, "note.wav", "Async note", "alice", "task-note");
 
-        assertThrows(ResourceNotFoundException.class,
-                () -> storage.requireMetadata("alice", inputKey));
+        storage.requireMetadata("alice", inputKey);
         storage.requireMetadata("alice", note.get("audioFilePath").toString());
         storage.requireMetadata("alice", note.get("noteFilePath").toString());
     }
@@ -91,7 +90,7 @@ class AccessibilityUploadSecurityTest {
                 mock(MoonshotChatClient.class), new UploadSecurityService(), storage);
 
         assertThrows(IOException.class, () -> service.saveVoiceNoteFromObject(
-                inputKey, "note.wav", "Async note", "alice"));
+                inputKey, "note.wav", "Async note", "alice", "task-note"));
 
         verify(storage, never()).delete("alice", inputKey);
     }

@@ -1,8 +1,8 @@
 package com.a09.tts.task;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.context.annotation.Profile;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.stereotype.Repository;
@@ -16,13 +16,16 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 @Repository
 @Profile("!nodb")
 public class JdbcTaskRepository implements TaskRepository {
     private static final String COLUMNS = """
-            task_id, owner_username, task_type, status, progress, result_data,
-            error_message, deduplication_key, created_at, started_at, finished_at
+            task_id, owner_username, task_type, status, progress, payload_json,
+            attempts, max_attempts, available_at, result_data, error_code,
+            error_message, deduplication_key, created_at, started_at, heartbeat_at,
+            finished_at, worker_id, version
             """;
     private final JdbcTemplate jdbcTemplate;
     private final TransactionTemplate transactionTemplate;
@@ -55,7 +58,6 @@ public class JdbcTaskRepository implements TaskRepository {
                 }
                 return CreateResult.duplicate(existing);
             }
-
             if (!reserveUserSlot(task.owner(), task.id(), perUserConcurrency)) {
                 status.setRollbackOnly();
                 return CreateResult.capacityExceeded();
@@ -85,12 +87,149 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public Optional<TaskRecord> claimNext(String workerId, Instant now) {
+        int updated = jdbcTemplate.update("""
+                UPDATE async_task
+                SET status = 'RUNNING', progress = 10, attempts = attempts + 1,
+                    started_at = ?, heartbeat_at = ?, worker_id = ?,
+                    error_code = NULL, error_message = NULL, version = version + 1
+                WHERE status = 'PENDING' AND available_at <= ?
+                ORDER BY available_at, created_at, task_id
+                LIMIT 1
+                """, timestamp(now), timestamp(now), workerId, timestamp(now));
+        return updated == 1
+                ? query("WHERE worker_id = ? AND status = 'RUNNING'", workerId)
+                : Optional.empty();
+    }
+
+    @Override
+    public boolean releaseClaim(String id, String workerId, Instant availableAt) {
+        return jdbcTemplate.update("""
+                UPDATE async_task
+                SET status = 'PENDING', progress = 0, attempts = attempts - 1,
+                    available_at = ?, started_at = NULL, heartbeat_at = NULL,
+                    worker_id = NULL, error_code = 'WORKER_SHUTDOWN',
+                    error_message = 'worker 关闭前释放任务', version = version + 1
+                WHERE task_id = ? AND status = 'RUNNING' AND worker_id = ?
+                  AND attempts > 0
+                """, timestamp(availableAt), id, workerId) == 1;
+    }
+
+    @Override
+    public boolean updateHeartbeat(String id, String workerId, Instant heartbeatAt) {
+        return jdbcTemplate.update("""
+                UPDATE async_task
+                SET heartbeat_at = ?, version = version + 1
+                WHERE task_id = ? AND status = 'RUNNING' AND worker_id = ?
+                """, timestamp(heartbeatAt), id, workerId) == 1;
+    }
+
+    @Override
+    public boolean completeSuccess(
+            String id, String workerId, String resultData, Instant finishedAt) {
+        return terminalTransition(id, """
+                UPDATE async_task
+                SET status = 'SUCCESS', progress = 100, result_data = ?,
+                    error_code = NULL, error_message = NULL, finished_at = ?,
+                    worker_id = NULL, version = version + 1
+                WHERE task_id = ? AND status = 'RUNNING' AND worker_id = ?
+                """, resultData, timestamp(finishedAt), id, workerId);
+    }
+
+    @Override
+    public boolean reschedule(
+            String id, String workerId, String errorCode,
+            String errorMessage, Instant availableAt) {
+        return jdbcTemplate.update("""
+                UPDATE async_task
+                SET status = 'PENDING', progress = 0, result_data = NULL,
+                    error_code = ?, error_message = ?, available_at = ?,
+                    started_at = NULL, heartbeat_at = NULL, finished_at = NULL,
+                    worker_id = NULL, version = version + 1
+                WHERE task_id = ? AND status = 'RUNNING' AND worker_id = ?
+                """, errorCode, errorMessage, timestamp(availableAt), id, workerId) == 1;
+    }
+
+    @Override
+    public boolean completeFailure(
+            String id, String workerId, String errorCode,
+            String errorMessage, Instant finishedAt) {
+        return terminalTransition(id, """
+                UPDATE async_task
+                SET status = 'FAILED', result_data = NULL, error_code = ?,
+                    error_message = ?, finished_at = ?, worker_id = NULL,
+                    version = version + 1
+                WHERE task_id = ? AND status = 'RUNNING' AND worker_id = ?
+                """, errorCode, errorMessage, timestamp(finishedAt), id, workerId);
+    }
+
+    @Override
+    public boolean completeTimeout(
+            String id, String workerId, String errorMessage, Instant finishedAt) {
+        return terminalTransition(id, """
+                UPDATE async_task
+                SET status = 'TIMEOUT', result_data = NULL, error_code = 'TASK_TIMEOUT',
+                    error_message = ?, finished_at = ?, worker_id = NULL,
+                    version = version + 1
+                WHERE task_id = ? AND status = 'RUNNING' AND worker_id = ?
+                """, errorMessage, timestamp(finishedAt), id, workerId);
+    }
+
+    @Override
+    public RecoveryResult recoverStale(Instant staleBefore, Instant availableAt) {
+        RecoveryResult recovered = transactionTemplate.execute(status -> {
+            String recoveryToken = "recovery:" + UUID.randomUUID();
+            int failed = jdbcTemplate.update("""
+                    UPDATE async_task
+                    SET status = 'FAILED', result_data = NULL,
+                        error_code = 'STALE_ATTEMPTS_EXHAUSTED',
+                        error_message = '任务心跳超时且重试次数已耗尽',
+                        finished_at = ?, worker_id = ?, version = version + 1
+                    WHERE status = 'RUNNING' AND heartbeat_at < ?
+                      AND attempts >= max_attempts
+                    """, timestamp(availableAt), recoveryToken, timestamp(staleBefore));
+            if (failed > 0) {
+                List<TaskRecord> failedTasks = jdbcTemplate.query(
+                        "SELECT " + COLUMNS + " FROM async_task WHERE worker_id = ?",
+                        this::map, recoveryToken);
+                jdbcTemplate.update("""
+                        DELETE slot FROM async_task_user_slot slot
+                        INNER JOIN async_task task ON task.task_id = slot.task_id
+                        WHERE task.worker_id = ? AND task.status = 'FAILED'
+                        """, recoveryToken);
+                jdbcTemplate.update("""
+                        UPDATE async_task SET worker_id = NULL
+                        WHERE worker_id = ? AND status = 'FAILED'
+                        """, recoveryToken);
+                int requeued = requeueStale(staleBefore, availableAt);
+                return new RecoveryResult(requeued, failedTasks);
+            }
+            return new RecoveryResult(requeueStale(staleBefore, availableAt), List.of());
+        });
+        return recovered == null ? new RecoveryResult(0, List.of()) : recovered;
+    }
+
+    private int requeueStale(Instant staleBefore, Instant availableAt) {
+        return jdbcTemplate.update("""
+                UPDATE async_task
+                SET status = 'PENDING', progress = 0, result_data = NULL,
+                    error_code = 'STALE_RECOVERED',
+                    error_message = '任务因 worker 心跳超时重新排队',
+                    available_at = ?, started_at = NULL, heartbeat_at = NULL,
+                    finished_at = NULL, worker_id = NULL, version = version + 1
+                WHERE status = 'RUNNING' AND heartbeat_at < ?
+                  AND attempts < max_attempts
+                """, timestamp(availableAt), timestamp(staleBefore));
+    }
+
+    @Override
     public boolean markRunning(String id, Instant startedAt) {
         return jdbcTemplate.update("""
                 UPDATE async_task
-                SET status = 'RUNNING', progress = 10, started_at = ?, error_message = NULL
+                SET status = 'RUNNING', progress = 10, attempts = attempts + 1,
+                    started_at = ?, heartbeat_at = ?, version = version + 1
                 WHERE task_id = ? AND status = 'PENDING'
-                """, Timestamp.from(startedAt), id) == 1;
+                """, timestamp(startedAt), timestamp(startedAt), id) == 1;
     }
 
     @Override
@@ -98,48 +237,60 @@ public class JdbcTaskRepository implements TaskRepository {
         return terminalTransition(id, """
                 UPDATE async_task
                 SET status = 'SUCCESS', progress = 100, result_data = ?,
-                    error_message = NULL, finished_at = ?
+                    error_code = NULL, error_message = NULL, finished_at = ?,
+                    worker_id = NULL, version = version + 1
                 WHERE task_id = ? AND status = 'RUNNING'
-                """, resultData, Timestamp.from(finishedAt), id);
+                """, resultData, timestamp(finishedAt), id);
     }
 
     @Override
     public boolean markFailed(String id, String errorMessage, Instant finishedAt) {
         return terminalTransition(id, """
                 UPDATE async_task
-                SET status = 'FAILED', result_data = NULL, error_message = ?, finished_at = ?
+                SET status = 'FAILED', result_data = NULL, error_code = 'TASK_FAILED',
+                    error_message = ?, finished_at = ?, worker_id = NULL,
+                    version = version + 1
                 WHERE task_id = ? AND status IN ('PENDING', 'RUNNING')
-                """, errorMessage, Timestamp.from(finishedAt), id);
+                """, errorMessage, timestamp(finishedAt), id);
     }
 
     @Override
     public boolean markTimedOut(String id, String errorMessage, Instant finishedAt) {
         return terminalTransition(id, """
                 UPDATE async_task
-                SET status = 'TIMEOUT', result_data = NULL, error_message = ?, finished_at = ?
+                SET status = 'TIMEOUT', result_data = NULL, error_code = 'TASK_TIMEOUT',
+                    error_message = ?, finished_at = ?, worker_id = NULL,
+                    version = version + 1
                 WHERE task_id = ? AND status IN ('PENDING', 'RUNNING')
-                """, errorMessage, Timestamp.from(finishedAt), id);
+                """, errorMessage, timestamp(finishedAt), id);
     }
 
     @Override
     public boolean markCancelled(String id, String owner, String errorMessage, Instant finishedAt) {
         return terminalTransition(id, """
                 UPDATE async_task
-                SET status = 'CANCELLED', error_message = ?, finished_at = ?
-                WHERE task_id = ? AND owner_username = ? AND status IN ('PENDING', 'RUNNING')
-                """, errorMessage, Timestamp.from(finishedAt), id, owner);
+                SET status = 'CANCELLED', error_code = 'TASK_CANCELLED',
+                    error_message = ?, finished_at = ?, worker_id = NULL,
+                    version = version + 1
+                WHERE task_id = ? AND owner_username = ?
+                  AND status IN ('PENDING', 'RUNNING')
+                """, errorMessage, timestamp(finishedAt), id, owner);
     }
 
     private void insert(TaskRecord task) {
         jdbcTemplate.update("""
                 INSERT INTO async_task (
-                    task_id, owner_username, task_type, status, progress, result_data,
-                    error_message, deduplication_key, created_at, started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                task.id(), task.owner(), task.type(), task.status().name(), task.progress(),
-                task.resultData(), task.errorMessage(), task.deduplicationKey(),
-                timestamp(task.createdAt()), timestamp(task.startedAt()), timestamp(task.finishedAt()));
+                    task_id, owner_username, task_type, status, progress, payload_json,
+                    attempts, max_attempts, available_at, result_data, error_code,
+                    error_message, deduplication_key, created_at, started_at, heartbeat_at,
+                    finished_at, worker_id, version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, task.id(), task.owner(), task.type(), task.status().name(), task.progress(),
+                task.payload(), task.attempts(), task.maxAttempts(), timestamp(task.availableAt()),
+                task.resultData(), task.errorCode(), task.errorMessage(), task.deduplicationKey(),
+                timestamp(task.createdAt()), timestamp(task.startedAt()),
+                timestamp(task.heartbeatAt()), timestamp(task.finishedAt()),
+                task.workerId(), task.version());
     }
 
     private Optional<TaskRecord> findActiveByDeduplication(
@@ -183,17 +334,19 @@ public class JdbcTaskRepository implements TaskRepository {
 
     private TaskRecord map(ResultSet resultSet, int rowNumber) throws SQLException {
         return new TaskRecord(
-                resultSet.getString("task_id"),
-                resultSet.getString("owner_username"),
+                resultSet.getString("task_id"), resultSet.getString("owner_username"),
                 resultSet.getString("task_type"),
                 TaskStatus.valueOf(resultSet.getString("status")),
-                resultSet.getInt("progress"),
-                resultSet.getString("result_data"),
-                resultSet.getString("error_message"),
-                resultSet.getString("deduplication_key"),
+                resultSet.getInt("progress"), resultSet.getString("payload_json"),
+                resultSet.getString("result_data"), resultSet.getString("error_code"),
+                resultSet.getString("error_message"), resultSet.getString("deduplication_key"),
+                resultSet.getInt("attempts"), resultSet.getInt("max_attempts"),
+                resultSet.getTimestamp("available_at").toInstant(),
                 resultSet.getTimestamp("created_at").toInstant(),
                 instant(resultSet.getTimestamp("started_at")),
-                instant(resultSet.getTimestamp("finished_at")));
+                instant(resultSet.getTimestamp("heartbeat_at")),
+                instant(resultSet.getTimestamp("finished_at")),
+                resultSet.getString("worker_id"), resultSet.getLong("version"));
     }
 
     private Timestamp timestamp(Instant instant) {

@@ -88,14 +88,13 @@ public class AccessibilityServiceImpl implements AccessibilityService {
 
     @Override
     public Map<String, Object> saveVoiceNoteFromObject(
-            String audioObjectKey, String originalFilename, String title, String owner)
+            String audioObjectKey, String originalFilename, String title,
+            String owner, String noteId)
             throws Exception {
         Metadata staged = objectStorage.requireMetadata(owner, audioObjectKey);
-        String noteId = newNoteId();
         String audioKey = ObjectStorageKeys.voiceNoteAudio(owner, noteId, originalFilename);
         objectStorage.withTemporaryCopy(owner, audioObjectKey, path -> {
             objectStorage.storeFile(owner, audioKey, path, staged.contentType());
-            objectStorage.delete(owner, audioObjectKey);
             return null;
         });
         return finishVoiceNote(audioKey, noteId, title, owner);

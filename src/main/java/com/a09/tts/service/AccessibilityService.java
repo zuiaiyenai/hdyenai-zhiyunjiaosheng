@@ -11,7 +11,8 @@ public interface AccessibilityService {
     Map<String, Object> saveVoiceNote(MultipartFile audioFile, String title, String owner) throws Exception;
 
     Map<String, Object> saveVoiceNoteFromObject(
-            String audioObjectKey, String originalFilename, String title, String owner) throws Exception;
+            String audioObjectKey, String originalFilename, String title,
+            String owner, String noteId) throws Exception;
 
     Map<String, Object> listVoiceNotes(String owner) throws Exception;
 

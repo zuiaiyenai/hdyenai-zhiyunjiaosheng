@@ -13,6 +13,24 @@ public interface TaskRepository {
 
     List<TaskRecord> findByOwner(String owner, int offset, int limit);
 
+    Optional<TaskRecord> claimNext(String workerId, Instant now);
+
+    boolean releaseClaim(String id, String workerId, Instant availableAt);
+
+    boolean updateHeartbeat(String id, String workerId, Instant heartbeatAt);
+
+    boolean completeSuccess(String id, String workerId, String resultData, Instant finishedAt);
+
+    boolean reschedule(String id, String workerId, String errorCode,
+                       String errorMessage, Instant availableAt);
+
+    boolean completeFailure(String id, String workerId, String errorCode,
+                            String errorMessage, Instant finishedAt);
+
+    boolean completeTimeout(String id, String workerId, String errorMessage, Instant finishedAt);
+
+    RecoveryResult recoverStale(Instant staleBefore, Instant availableAt);
+
     boolean markRunning(String id, Instant startedAt);
 
     boolean markSucceeded(String id, String resultData, Instant finishedAt);
@@ -41,5 +59,8 @@ public interface TaskRepository {
         public static CreateResult capacityExceeded() {
             return new CreateResult(CreateDisposition.CAPACITY_EXCEEDED, null);
         }
+    }
+
+    record RecoveryResult(int requeued, List<TaskRecord> failed) {
     }
 }
