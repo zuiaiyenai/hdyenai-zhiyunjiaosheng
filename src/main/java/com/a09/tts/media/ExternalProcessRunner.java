@@ -1,5 +1,7 @@
 package com.a09.tts.media;
 
+import com.a09.tts.task.TaskResource;
+import com.a09.tts.task.TaskResourceBulkheads;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -17,15 +19,23 @@ import java.util.concurrent.TimeUnit;
 public class ExternalProcessRunner {
     private static final int MAX_CAPTURED_OUTPUT_BYTES = 1024 * 1024;
     private final Duration defaultTimeout;
+    private final TaskResourceBulkheads bulkheads;
     private final Map<Thread, Process> activeProcesses = new ConcurrentHashMap<>();
+
+    public ExternalProcessRunner(
+            @Value("${app.media.process-timeout:10m}") Duration defaultTimeout) {
+        this(defaultTimeout, TaskResourceBulkheads.unrestricted());
+    }
 
     @Autowired
     public ExternalProcessRunner(
-            @Value("${app.media.process-timeout:10m}") Duration defaultTimeout) {
+            @Value("${app.media.process-timeout:10m}") Duration defaultTimeout,
+            TaskResourceBulkheads bulkheads) {
         if (defaultTimeout == null || defaultTimeout.isZero() || defaultTimeout.isNegative()) {
             throw new IllegalArgumentException("外部进程超时必须大于 0");
         }
         this.defaultTimeout = defaultTimeout;
+        this.bulkheads = bulkheads;
     }
 
     public ProcessResult run(List<String> command, String failureMessage) throws IOException {
@@ -37,49 +47,51 @@ public class ExternalProcessRunner {
         if (command == null || command.isEmpty()) {
             throw new IllegalArgumentException("外部进程命令不能为空");
         }
-        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        Thread owner = Thread.currentThread();
-        activeProcesses.put(owner, process);
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        Thread reader = new Thread(() -> {
-            try (var input = process.getInputStream()) {
-                byte[] buffer = new byte[8192];
-                int captured = 0;
-                int read;
-                while ((read = input.read(buffer)) >= 0) {
-                    int writable = Math.min(read, MAX_CAPTURED_OUTPUT_BYTES - captured);
-                    if (writable > 0) {
-                        output.write(buffer, 0, writable);
-                        captured += writable;
+        try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.FFMPEG)) {
+            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            Thread owner = Thread.currentThread();
+            activeProcesses.put(owner, process);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            Thread reader = new Thread(() -> {
+                try (var input = process.getInputStream()) {
+                    byte[] buffer = new byte[8192];
+                    int captured = 0;
+                    int read;
+                    while ((read = input.read(buffer)) >= 0) {
+                        int writable = Math.min(read, MAX_CAPTURED_OUTPUT_BYTES - captured);
+                        if (writable > 0) {
+                            output.write(buffer, 0, writable);
+                            captured += writable;
+                        }
                     }
+                } catch (IOException ignoredReadFailure) {
+                    // Process termination closes the stream.
                 }
-            } catch (IOException ignored) {
-                // Process termination closes the stream.
-            }
-        }, "media-process-output");
-        reader.setDaemon(true);
-        reader.start();
-        try {
-            if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-                terminate(process);
+            }, "media-process-output");
+            reader.setDaemon(true);
+            reader.start();
+            try {
+                if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    terminate(process);
+                    join(reader);
+                    throw new IOException(failureMessage + "：处理超时");
+                }
                 join(reader);
-                throw new IOException(failureMessage + "：处理超时");
-            }
-            join(reader);
-            int exitCode = process.exitValue();
-            String text = output.toString(StandardCharsets.UTF_8);
-            if (exitCode != 0) {
-                throw new IOException(failureMessage + "（退出码 " + exitCode + "）");
-            }
-            return new ProcessResult(exitCode, text);
-        } catch (InterruptedException exception) {
-            terminate(process);
-            Thread.currentThread().interrupt();
-            throw new IOException(failureMessage + "：处理被取消", exception);
-        } finally {
-            activeProcesses.remove(owner, process);
-            if (process.isAlive()) {
+                int exitCode = process.exitValue();
+                String text = output.toString(StandardCharsets.UTF_8);
+                if (exitCode != 0) {
+                    throw new IOException(failureMessage + "（退出码 " + exitCode + "）");
+                }
+                return new ProcessResult(exitCode, text);
+            } catch (InterruptedException exception) {
                 terminate(process);
+                Thread.currentThread().interrupt();
+                throw new IOException(failureMessage + "：处理被取消", exception);
+            } finally {
+                activeProcesses.remove(owner, process);
+                if (process.isAlive()) {
+                    terminate(process);
+                }
             }
         }
     }

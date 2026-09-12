@@ -50,7 +50,8 @@ class MediaTaskServiceTest {
                 mock(AccessibilityService.class),
                 mock(VideoVoiceSwapService.class), mock(SoundCloneService.class),
                 mock(SpeakingPracticeService.class), mock(PPTService.class),
-                mock(CoursewareProjectService.class), objectMapper);
+                mock(CoursewareProjectService.class), objectMapper,
+                TaskResourceBulkheads.unrestricted());
         AsyncTaskService tasks = new AsyncTaskService(
                 new InMemoryTaskRepository(), dispatcher, objectMapper, 1,
                 Duration.ofMillis(5), Duration.ofSeconds(5), Duration.ofMillis(20),

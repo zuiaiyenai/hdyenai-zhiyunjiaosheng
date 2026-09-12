@@ -63,6 +63,16 @@ app:
     per-user-concurrency: "${TASK_PER_USER_CONCURRENCY:2}"
   media:
     process-timeout: "${MEDIA_PROCESS_TIMEOUT:10m}"
+  resources:
+    acquire-timeout: "${RESOURCE_ACQUIRE_TIMEOUT:50ms}"
+    tts:
+      max-concurrent: "${TTS_MAX_CONCURRENT:1}"
+    asr:
+      max-concurrent: "${ASR_MAX_CONCURRENT:1}"
+    ffmpeg:
+      max-concurrent: "${FFMPEG_MAX_CONCURRENT:1}"
+    courseware:
+      max-concurrent: "${COURSEWARE_MAX_CONCURRENT:1}"
   cors:
     allowed-origins: "${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}"
   security:

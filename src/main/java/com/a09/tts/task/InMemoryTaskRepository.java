@@ -79,12 +79,14 @@ public class InMemoryTaskRepository implements TaskRepository {
     }
 
     @Override
-    public synchronized boolean releaseClaim(String id, String workerId, Instant availableAt) {
+    public synchronized boolean releaseClaim(
+            String id, String workerId, String errorCode,
+            String errorMessage, Instant availableAt) {
         return transition(id, null,
                 task -> task.status() == TaskStatus.RUNNING
                         && workerId.equals(task.workerId()) && task.attempts() > 0,
                 task -> state(task, TaskStatus.PENDING, 0, null,
-                        "WORKER_SHUTDOWN", "worker 关闭前释放任务",
+                        errorCode, errorMessage,
                         task.attempts() - 1, availableAt, null, null, null, null));
     }
 

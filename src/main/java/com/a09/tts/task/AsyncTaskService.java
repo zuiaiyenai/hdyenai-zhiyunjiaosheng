@@ -27,7 +27,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
 
 @Service
 public class AsyncTaskService {
@@ -86,7 +86,7 @@ public class AsyncTaskService {
                 runnable, "db-task-worker-" + workerNumber.incrementAndGet());
         this.workers = new ThreadPoolExecutor(
                 workerCount, workerCount, 0, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(), workerFactory);
+                new SynchronousQueue<>(), workerFactory);
         ExecutorServiceMetrics.monitor(meterRegistry, workers,
                 "fctts.async.tasks", java.util.List.<Tag>of());
         AtomicInteger schedulerNumber = new AtomicInteger();
@@ -182,7 +182,8 @@ public class AsyncTaskService {
                     continue;
                 }
                 if (!accepting.get() || Thread.currentThread().isInterrupted()) {
-                    repository.releaseClaim(task.id(), task.workerId(), Instant.now());
+                    repository.releaseClaim(task.id(), task.workerId(), "WORKER_SHUTDOWN",
+                            "worker 关闭前释放任务", Instant.now());
                     break;
                 }
                 executeClaimed(task);
@@ -240,6 +241,16 @@ public class AsyncTaskService {
         TaskRecord latest = repository.findById(claimed.id()).orElse(claimed);
         if (latest.status() != TaskStatus.RUNNING
                 || !claimed.workerId().equals(latest.workerId())) {
+            return;
+        }
+        if (exception instanceof ResourceCapacityException) {
+            boolean running = accepting.get();
+            if (repository.releaseClaim(latest.id(), latest.workerId(),
+                    running ? "RESOURCE_SATURATED" : "WORKER_SHUTDOWN",
+                    running ? "任务等待资源配额" : "worker 关闭前释放任务",
+                    running ? Instant.now().plus(pollInterval) : Instant.now())) {
+                log.debug("任务尚未获得资源，已释放领取: taskId={}", latest.id());
+            }
             return;
         }
         String code = accepting.get() ? "TASK_EXECUTION_FAILED" : "WORKER_SHUTDOWN";

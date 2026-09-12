@@ -2,6 +2,9 @@ package com.a09.tts.service.impl;
 
 import com.a09.tts.api.ServiceUnavailableException;
 import com.a09.tts.service.SoundCloneService;
+import com.a09.tts.task.TaskResource;
+import com.a09.tts.task.TaskResourceBulkheads;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
@@ -21,12 +24,20 @@ import java.util.Map;
 @Service
 public class SoundCloneServiceImpl implements SoundCloneService {
     private final RestTemplate restTemplate;
+    private final TaskResourceBulkheads bulkheads;
 
     @Value("${sound-clone.api.url}")
     private String apiUrl;
 
     public SoundCloneServiceImpl(RestTemplate restTemplate) {
+        this(restTemplate, TaskResourceBulkheads.unrestricted());
+    }
+
+    @Autowired
+    public SoundCloneServiceImpl(
+            RestTemplate restTemplate, TaskResourceBulkheads bulkheads) {
         this.restTemplate = restTemplate;
+        this.bulkheads = bulkheads;
     }
 
     @Override
@@ -45,7 +56,7 @@ public class SoundCloneServiceImpl implements SoundCloneService {
         HttpHeaders requestHeaders = new HttpHeaders();
         requestHeaders.setContentType(MediaType.APPLICATION_JSON);
         StreamingResponseBody body = outputStream -> {
-            try {
+            try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
                 restTemplate.execute(
                         apiUrl,
                         HttpMethod.POST,

@@ -242,12 +242,79 @@ class AsyncTaskServiceTest {
         TaskRecord claimed = repository.claimNext("stopping-worker", now).orElseThrow();
         assertEquals(1, claimed.attempts());
 
-        assertTrue(repository.releaseClaim(claimed.id(), claimed.workerId(), now));
+        assertTrue(repository.releaseClaim(claimed.id(), claimed.workerId(),
+                "WORKER_SHUTDOWN", "worker 关闭前释放任务", now));
 
         TaskRecord released = repository.findById(claimed.id()).orElseThrow();
         assertEquals(TaskStatus.PENDING, released.status());
         assertEquals(0, released.attempts());
         assertTrue(released.workerId() == null);
+    }
+
+    @Test
+    void resourceSaturationDefersWithoutConsumingAnAttempt() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        TaskResourceBulkheads bulkheads = new TaskResourceBulkheads(
+                Map.of(TaskResource.TTS, 1, TaskResource.ASR, 1,
+                        TaskResource.FFMPEG, 1, TaskResource.COURSEWARE, 1),
+                Duration.ZERO, new SimpleMeterRegistry());
+        TaskDispatcher dispatcher = dispatcher(task -> {
+            try (TaskResourceBulkheads.Permit ignored =
+                         bulkheads.acquire(TaskResource.TTS)) {
+                return "done";
+            }
+        });
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(2), Duration.ofMillis(10), 1,
+                new SimpleMeterRegistry());
+        try {
+            TaskSubmission submission;
+            try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
+                submission = service.submit(
+                        "alice", "SOUND_CLONE", null, Map.of("id", 1), 1);
+                TaskRecord deferred = awaitStatus(
+                        service, submission.taskId(), "alice", TaskStatus.PENDING);
+                assertEquals(0, deferred.attempts());
+                assertEquals("RESOURCE_SATURATED", deferred.errorCode());
+            }
+            TaskRecord completed = awaitTerminal(service, submission.taskId(), "alice");
+            assertEquals(TaskStatus.SUCCESS, completed.status());
+            assertEquals(1, completed.attempts());
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void shutdownWhileWaitingForResourceReleasesClaimWithoutAttempt() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        TaskResourceBulkheads bulkheads = new TaskResourceBulkheads(
+                Map.of(TaskResource.TTS, 1, TaskResource.ASR, 1,
+                        TaskResource.FFMPEG, 1, TaskResource.COURSEWARE, 1),
+                Duration.ofSeconds(30), new SimpleMeterRegistry());
+        AtomicInteger entered = new AtomicInteger();
+        TaskDispatcher dispatcher = dispatcher(task -> {
+            entered.incrementAndGet();
+            try (TaskResourceBulkheads.Permit ignored =
+                         bulkheads.acquire(TaskResource.TTS)) {
+                return "done";
+            }
+        });
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(30), Duration.ofMillis(10), 1,
+                new SimpleMeterRegistry());
+        TaskSubmission submission;
+        try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
+            submission = service.submit(
+                    "alice", "SOUND_CLONE", null, Map.of("id", 1), 1);
+            assertTrue(awaitValue(entered, 1));
+            service.shutdown();
+        }
+
+        TaskRecord released = service.get(submission.taskId(), "alice");
+        assertEquals(TaskStatus.PENDING, released.status());
+        assertEquals(0, released.attempts());
+        assertEquals("WORKER_SHUTDOWN", released.errorCode());
     }
 
     @Test
@@ -329,6 +396,21 @@ class AsyncTaskServiceTest {
             Thread.sleep(5);
         } while (System.nanoTime() < deadline);
         throw new AssertionError("task did not become terminal: " + task);
+    }
+
+    private TaskRecord awaitStatus(
+            AsyncTaskService service, String id, String owner, TaskStatus status)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        TaskRecord task;
+        do {
+            task = service.get(id, owner);
+            if (task.status() == status && task.errorCode() != null) {
+                return task;
+            }
+            Thread.sleep(5);
+        } while (System.nanoTime() < deadline);
+        throw new AssertionError("task did not reach status: " + task);
     }
 
     private boolean awaitValue(AtomicInteger value, int expected) throws InterruptedException {

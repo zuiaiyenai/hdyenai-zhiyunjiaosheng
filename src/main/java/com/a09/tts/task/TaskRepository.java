@@ -15,7 +15,8 @@ public interface TaskRepository {
 
     Optional<TaskRecord> claimNext(String workerId, Instant now);
 
-    boolean releaseClaim(String id, String workerId, Instant availableAt);
+    boolean releaseClaim(String id, String workerId, String errorCode,
+                         String errorMessage, Instant availableAt);
 
     boolean updateHeartbeat(String id, String workerId, Instant heartbeatAt);
 

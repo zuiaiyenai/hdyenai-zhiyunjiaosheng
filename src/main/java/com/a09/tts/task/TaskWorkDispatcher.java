@@ -43,13 +43,14 @@ public class TaskWorkDispatcher implements TaskDispatcher {
     private final PPTService pptService;
     private final CoursewareProjectService coursewareService;
     private final ObjectMapper objectMapper;
+    private final TaskResourceBulkheads bulkheads;
 
     public TaskWorkDispatcher(
             ManagedObjectStorageService objectStorage, ASRService asrService,
             AccessibilityService accessibilityService, VideoVoiceSwapService videoService,
             SoundCloneService soundCloneService, SpeakingPracticeService speakingPracticeService,
             PPTService pptService, CoursewareProjectService coursewareService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper, TaskResourceBulkheads bulkheads) {
         this.objectStorage = objectStorage;
         this.asrService = asrService;
         this.accessibilityService = accessibilityService;
@@ -59,24 +60,28 @@ public class TaskWorkDispatcher implements TaskDispatcher {
         this.pptService = pptService;
         this.coursewareService = coursewareService;
         this.objectMapper = objectMapper;
+        this.bulkheads = bulkheads;
     }
 
     @Override
     public String execute(TaskRecord task) throws Exception {
-        return switch (task.type()) {
-            case "ASR_TRANSCRIBE" -> executeAsr(task);
-            case "VOICE_NOTE" -> executeVoiceNote(task);
-            case "VIDEO_SUBTITLES" -> executeVideoSubtitles(task);
-            case "VIDEO_VOICE_SWAP" -> executeVideoSwap(task);
-            case "SOUND_CLONE" -> executeSoundClone(task);
-            case "SPEAKING_EVALUATION" -> executeSpeakingEvaluation(task);
-            case "PPT_SUMMARY" -> executePptSummary(task);
-            case "COURSEWARE_CREATE" -> executeCoursewareCreate(task);
-            case "COURSEWARE_OPTIMIZE" -> executeCoursewareOptimize(task);
-            case "COURSEWARE_AUDIO" -> executeCoursewareAudio(task);
-            case "COURSEWARE_VIDEO" -> executeCoursewareVideo(task);
-            default -> throw new IllegalArgumentException("未知任务类型: " + task.type());
-        };
+        try (TaskResourceBulkheads.Permit ignored =
+                     bulkheads.acquire(TaskResourceProfiles.resourcesFor(task.type()))) {
+            return switch (task.type()) {
+                case "ASR_TRANSCRIBE" -> executeAsr(task);
+                case "VOICE_NOTE" -> executeVoiceNote(task);
+                case "VIDEO_SUBTITLES" -> executeVideoSubtitles(task);
+                case "VIDEO_VOICE_SWAP" -> executeVideoSwap(task);
+                case "SOUND_CLONE" -> executeSoundClone(task);
+                case "SPEAKING_EVALUATION" -> executeSpeakingEvaluation(task);
+                case "PPT_SUMMARY" -> executePptSummary(task);
+                case "COURSEWARE_CREATE" -> executeCoursewareCreate(task);
+                case "COURSEWARE_OPTIMIZE" -> executeCoursewareOptimize(task);
+                case "COURSEWARE_AUDIO" -> executeCoursewareAudio(task);
+                case "COURSEWARE_VIDEO" -> executeCoursewareVideo(task);
+                default -> throw new IllegalArgumentException("未知任务类型: " + task.type());
+            };
+        }
     }
 
     @Override

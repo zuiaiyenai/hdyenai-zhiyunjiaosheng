@@ -178,7 +178,11 @@ class AsyncTaskMySqlIntegrationTest {
         first.create(durableTask(releasedId, "released-user", "RELEASED", 1, now), 2);
         TaskRecord released = first.claimNext("stopping-worker", Instant.now()).orElseThrow();
         assertEquals(releasedId, released.id());
-        assertTrue(first.releaseClaim(released.id(), released.workerId(), Instant.now()));
+        assertTrue(first.releaseClaim(released.id(), released.workerId(),
+                "RESOURCE_SATURATED", "任务等待资源配额", Instant.now()));
+        TaskRecord deferred = first.findById(releasedId).orElseThrow();
+        assertEquals(0, deferred.attempts());
+        assertEquals("RESOURCE_SATURATED", deferred.errorCode());
         TaskRecord reclaimed = second.claimNext("replacement-worker", Instant.now()).orElseThrow();
         assertEquals(releasedId, reclaimed.id());
         assertEquals(1, reclaimed.attempts());
@@ -278,9 +282,10 @@ class AsyncTaskMySqlIntegrationTest {
     private void requireDedicatedVerificationSchema(String url) {
         String withoutQuery = url.replaceFirst("\\?.*$", "");
         String schema = withoutQuery.substring(withoutQuery.lastIndexOf('/') + 1);
-        if (!schema.matches("tts_phase5_worker_verify_[a-zA-Z0-9_]+")) {
+        if (!schema.matches("tts_phase(?:5_worker|6_resource)_verify_[a-zA-Z0-9_]+")) {
             throw new IllegalArgumentException(
-                    "MYSQL_INTEGRATION_URL must target a dedicated tts_phase5_worker_verify_* schema");
+                    "MYSQL_INTEGRATION_URL must target a dedicated "
+                            + "tts_phase5_worker_verify_* or tts_phase6_resource_verify_* schema");
         }
     }
 }

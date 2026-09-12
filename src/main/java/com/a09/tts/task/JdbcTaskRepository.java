@@ -103,16 +103,17 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
-    public boolean releaseClaim(String id, String workerId, Instant availableAt) {
+    public boolean releaseClaim(String id, String workerId, String errorCode,
+                                String errorMessage, Instant availableAt) {
         return jdbcTemplate.update("""
                 UPDATE async_task
                 SET status = 'PENDING', progress = 0, attempts = attempts - 1,
                     available_at = ?, started_at = NULL, heartbeat_at = NULL,
-                    worker_id = NULL, error_code = 'WORKER_SHUTDOWN',
-                    error_message = 'worker 关闭前释放任务', version = version + 1
+                    worker_id = NULL, error_code = ?, error_message = ?,
+                    version = version + 1
                 WHERE task_id = ? AND status = 'RUNNING' AND worker_id = ?
                   AND attempts > 0
-                """, timestamp(availableAt), id, workerId) == 1;
+                """, timestamp(availableAt), errorCode, errorMessage, id, workerId) == 1;
     }
 
     @Override

@@ -3,11 +3,14 @@ package com.a09.tts.service.impl;
 import com.a09.tts.api.AsrResult;
 import com.a09.tts.api.ServiceUnavailableException;
 import com.a09.tts.service.ASRService;
+import com.a09.tts.task.TaskResource;
+import com.a09.tts.task.TaskResourceBulkheads;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -29,6 +32,7 @@ public class ASRServiceImpl implements ASRService {
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final TaskResourceBulkheads bulkheads;
 
     @Value("${asr.api.url}")
     private String apiUrl;
@@ -37,8 +41,16 @@ public class ASRServiceImpl implements ASRService {
     private String accessToken;
 
     public ASRServiceImpl(RestTemplate restTemplate, ObjectMapper objectMapper) {
+        this(restTemplate, objectMapper, TaskResourceBulkheads.unrestricted());
+    }
+
+    @Autowired
+    public ASRServiceImpl(
+            RestTemplate restTemplate, ObjectMapper objectMapper,
+            TaskResourceBulkheads bulkheads) {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
+        this.bulkheads = bulkheads;
     }
 
     public String transcribe(String filePath, String language) {
@@ -63,7 +75,7 @@ public class ASRServiceImpl implements ASRService {
             headers.setBearerAuth(accessToken);
         }
 
-        try {
+        try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.ASR)) {
             ResponseEntity<String> response = restTemplate.postForEntity(
                     apiUrl, new HttpEntity<>(body, headers), String.class);
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {

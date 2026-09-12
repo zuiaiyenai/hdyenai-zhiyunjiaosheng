@@ -2,6 +2,10 @@ package com.a09.tts.service.impl;
 
 import com.a09.tts.api.ServiceUnavailableException;
 import com.a09.tts.service.TTSService;
+import com.a09.tts.task.ResourceCapacityException;
+import com.a09.tts.task.TaskResource;
+import com.a09.tts.task.TaskResourceBulkheads;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,6 +43,7 @@ public class TTSServiceImpl implements TTSService {
             "Katherine_Maher_reference", "Hi, my name is Katherine Maher. I am the executive director of Wikimedia Foundation."
     );
     private final WebClient webClient;
+    private final TaskResourceBulkheads bulkheads;
 
     @Value("${tts.api.url}")
     private String apiUrl;
@@ -53,9 +58,16 @@ public class TTSServiceImpl implements TTSService {
     private String englishVoice;
 
     public TTSServiceImpl(WebClient.Builder webClientBuilder) {
+        this(webClientBuilder, TaskResourceBulkheads.unrestricted());
+    }
+
+    @Autowired
+    public TTSServiceImpl(
+            WebClient.Builder webClientBuilder, TaskResourceBulkheads bulkheads) {
         this.webClient = webClientBuilder
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(50 * 1024 * 1024))
                 .build();
+        this.bulkheads = bulkheads;
     }
 
     @Override
@@ -65,7 +77,7 @@ public class TTSServiceImpl implements TTSService {
 
     @Override
     public ResponseEntity<byte[]> tts(String text, String voice, double speed, double pitch, double rhythm) {
-        try {
+        try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
             byte[] audio = audioFlux(createRequest(text, voice, speed, pitch, rhythm, false))
                     .reduce(new ArrayList<byte[]>(), (chunks, buffer) -> {
                         byte[] bytes = new byte[buffer.readableByteCount()];
@@ -95,7 +107,7 @@ public class TTSServiceImpl implements TTSService {
     @Override
     public void stream(String text, String voice, double speed, double pitch, double rhythm,
                        OutputStream outputStream) throws IOException {
-        try {
+        try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
             audioFlux(createRequest(text, voice, speed, pitch, rhythm, true))
                     .doOnNext(buffer -> {
                         try {
@@ -113,6 +125,8 @@ public class TTSServiceImpl implements TTSService {
                     .block(Duration.ofMinutes(10));
         } catch (UncheckedIOException exception) {
             throw exception.getCause();
+        } catch (ResourceCapacityException exception) {
+            throw exception;
         } catch (Exception exception) {
             log.error("GPT-SoVITS streaming call failed", exception);
             throw new IOException("GPT-SoVITS 流式合成失败", exception);
