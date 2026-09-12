@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import com.a09.tts.pojo.User;
 import com.a09.tts.service.UserService;
 import com.a09.tts.security.LoginRateLimiter;
+import com.a09.tts.security.ClientIpResolver;
 import com.a09.tts.security.PasswordPolicy;
 import com.a09.tts.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,9 @@ public class UserController {
 
     @Autowired
     private LoginRateLimiter loginRateLimiter;
+
+    @Autowired
+    private ClientIpResolver clientIpResolver;
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, Object>> registerUser(@RequestBody User user) {
@@ -90,15 +94,14 @@ public class UserController {
                 result.put("msg", "用户名或密码不能为空！");
                 return new ResponseEntity<>(result, HttpStatus.BAD_REQUEST);
             }
-            String ip = request.getRemoteAddr();
-            if (loginRateLimiter.isBlocked(ip, username)) {
+            String ip = clientIpResolver.resolve(request);
+            if (loginRateLimiter.isBlocked(ip)) {
                 result.put("code", 429);
                 result.put("msg", "登录失败次数过多，请稍后再试");
                 return new ResponseEntity<>(result, HttpStatus.TOO_MANY_REQUESTS);
             }
             Boolean loginSuccess = userService.login(username, password);
             if (loginSuccess) {
-                loginRateLimiter.recordSuccess(ip, username);
                 String token = jwtUtil.generateToken(username);
                 result.put("code", 200);
                 result.put("msg", "登陆成功！");
@@ -106,7 +109,7 @@ public class UserController {
                 result.put("username", username);
                 return new ResponseEntity<>(result, HttpStatus.OK);
             } else {
-                loginRateLimiter.recordFailure(ip, username);
+                loginRateLimiter.recordFailure(ip);
                 result.put("code", 401);
                 result.put("msg", "用户名或密码错误");
                 return new ResponseEntity<>(result, HttpStatus.UNAUTHORIZED);

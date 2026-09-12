@@ -83,6 +83,13 @@ app:
       max-failures: "${LOGIN_MAX_FAILURES:5}"
       window: "${LOGIN_FAILURE_WINDOW:10m}"
       lock-duration: "${LOGIN_LOCK_DURATION:15m}"
+      fallback-max-entries: "${LOGIN_RATE_LIMIT_FALLBACK_MAX_ENTRIES:10000}"
+    endpoint-rate-limit:
+      enabled: "${ENDPOINT_RATE_LIMIT_ENABLED:true}"
+      max-requests: "${ENDPOINT_RATE_LIMIT_MAX_REQUESTS:120}"
+      window: "${ENDPOINT_RATE_LIMIT_WINDOW:1m}"
+      fallback-max-entries: "${ENDPOINT_RATE_LIMIT_FALLBACK_MAX_ENTRIES:10000}"
+    trusted-proxies: "${TRUSTED_PROXIES:127.0.0.1,::1}"
   upload:
     audio-max-size: "${UPLOAD_AUDIO_MAX_SIZE:20MB}"
     image-max-size: "${UPLOAD_IMAGE_MAX_SIZE:10MB}"

@@ -2,6 +2,7 @@ package com.a09.tts.controller;
 
 import com.a09.tts.pojo.User;
 import com.a09.tts.security.LoginRateLimiter;
+import com.a09.tts.security.ClientIpResolver;
 import com.a09.tts.security.PasswordPolicy;
 import com.a09.tts.service.UserService;
 import com.a09.tts.util.JwtUtil;
@@ -43,7 +44,7 @@ class UserControllerSecurityTest {
     void blockedLoginReturnsTooManyRequestsWithoutCheckingPassword() {
         UserService users = mock(UserService.class);
         LoginRateLimiter limiter = mock(LoginRateLimiter.class);
-        when(limiter.isBlocked("127.0.0.1", "alice")).thenReturn(true);
+        when(limiter.isBlocked("127.0.0.1")).thenReturn(true);
         UserController controller = controller(users, limiter);
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRemoteAddr("127.0.0.1");
@@ -75,6 +76,7 @@ class UserControllerSecurityTest {
         ReflectionTestUtils.setField(controller, "jwtUtil", mock(JwtUtil.class));
         ReflectionTestUtils.setField(controller, "passwordPolicy", mock(PasswordPolicy.class));
         ReflectionTestUtils.setField(controller, "loginRateLimiter", limiter);
+        ReflectionTestUtils.setField(controller, "clientIpResolver", new ClientIpResolver("127.0.0.1,::1"));
         return controller;
     }
 }

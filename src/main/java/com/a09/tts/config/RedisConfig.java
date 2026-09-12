@@ -68,7 +68,42 @@ public class RedisConfig {
                         "voiceList", defaults.entryTtl(Duration.ofMinutes(10)),
                         "voiceById", defaults.entryTtl(Duration.ofMinutes(30))
                 ))
+                .enableStatistics()
                 .build();
+    }
+
+    @Bean
+    public RedisScript<List> loginFailureScript() {
+        return RedisScript.of("""
+                if redis.call('EXISTS', KEYS[2]) == 1 then
+                    return {1, redis.call('PTTL', KEYS[2])}
+                end
+                local failures = redis.call('INCR', KEYS[1])
+                if failures == 1 then
+                    redis.call('PEXPIRE', KEYS[1], ARGV[2])
+                end
+                if failures >= tonumber(ARGV[1]) then
+                    redis.call('SET', KEYS[2], '1', 'PX', ARGV[3])
+                    redis.call('DEL', KEYS[1])
+                    return {1, tonumber(ARGV[3])}
+                end
+                return {0, redis.call('PTTL', KEYS[1])}
+                """, List.class);
+    }
+
+    @Bean
+    public RedisScript<List> fixedWindowRateLimitScript() {
+        return RedisScript.of("""
+                local count = redis.call('INCR', KEYS[1])
+                if count == 1 then
+                    redis.call('PEXPIRE', KEYS[1], ARGV[2])
+                end
+                local ttl = redis.call('PTTL', KEYS[1])
+                if count <= tonumber(ARGV[1]) then
+                    return {1, count, ttl}
+                end
+                return {0, count, ttl}
+                """, List.class);
     }
 
     @Bean
