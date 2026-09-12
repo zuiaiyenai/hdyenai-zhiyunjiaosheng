@@ -47,6 +47,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -193,10 +194,17 @@ public class CoursewareProjectService {
     public PageResult<ProjectView> list(String owner, Integer pageValue, Integer sizeValue) {
         int page = Pagination.page(pageValue);
         int size = Pagination.size(sizeValue);
-        List<ProjectView> window = projectRepository.findByOwner(
-                        normalizeOwner(owner), Pagination.offset(page, size), size + 1)
-                .stream()
-                .map(this::restore)
+        List<ProjectData> projectWindow = projectRepository.findByOwner(
+                normalizeOwner(owner), Pagination.offset(page, size), size + 1);
+        Map<String, List<RevisionData>> revisionsByProject = new HashMap<>();
+        for (RevisionData revision : projectRepository.findRevisionsByProjectIds(
+                projectWindow.stream().map(ProjectData::projectId).toList())) {
+            revisionsByProject.computeIfAbsent(
+                    revision.projectId(), ignored -> new ArrayList<>()).add(revision);
+        }
+        List<ProjectView> window = projectWindow.stream()
+                .map(project -> restore(project,
+                        revisionsByProject.getOrDefault(project.projectId(), List.of())))
                 .map(this::view)
                 .toList();
         return PageResult.fromWindow(window, page, size);
@@ -631,6 +639,10 @@ public class CoursewareProjectService {
     }
 
     private ProjectState restore(ProjectData data) {
+        return restore(data, projectRepository.findRevisions(data.projectId()));
+    }
+
+    private ProjectState restore(ProjectData data, List<RevisionData> revisions) {
         String objectPrefix = ObjectStorageKeys.requireValid(data.outputPath()) + "/";
         String sourceKey = ObjectStorageKeys.requireValid(data.sourcePath());
         Path directory = UploadUtils.resolveWithin(storageRoot(), "work/" + data.projectId());
@@ -659,7 +671,7 @@ public class CoursewareProjectService {
             state.updatedAt = Instant.now();
             persist(state);
         }
-        for (RevisionData revision : projectRepository.findRevisions(data.projectId())) {
+        for (RevisionData revision : revisions) {
             state.revisions.add(new Revision(revision.revisionNumber(), revision.instruction(),
                     revision.script(), revision.createdAt()));
         }

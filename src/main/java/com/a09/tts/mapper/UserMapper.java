@@ -6,8 +6,6 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
-import java.util.List;
-
 /**
  *与用户注册登录操作相关的Mapper层接口
  *
@@ -37,14 +35,6 @@ public interface UserMapper {
      */
     @Select("select * from user where username=#{username}")
     public User findByUsername(String username);
-
-    /**
-     * 用于查询用户表中的所有数据，管理员权限
-     *
-     * @return 所有用户实体类
-     */
-    @Select("SELECT user_id, username, password, permission FROM user")
-    public List<User> findAllUsers();
 
     /**
      * 用于用户登录

@@ -26,12 +26,16 @@ public class InMemoryStoredObjectMetadataRepository implements StoredObjectMetad
     }
 
     @Override
-    public List<Metadata> findByOwnerAndPrefix(String owner, String prefix) {
+    public List<Metadata> findByOwnerAndPrefixAndSuffix(
+            String owner, String prefix, String suffix, int offset, int limit) {
         return objects.values().stream()
                 .filter(metadata -> metadata.owner().equals(owner))
                 .filter(metadata -> metadata.objectKey().startsWith(prefix))
+                .filter(metadata -> metadata.objectKey().endsWith(suffix))
                 .sorted(Comparator.comparing(Metadata::createdAt).reversed()
                         .thenComparing(Metadata::objectKey, Comparator.reverseOrder()))
+                .skip(offset)
+                .limit(limit)
                 .toList();
     }
 

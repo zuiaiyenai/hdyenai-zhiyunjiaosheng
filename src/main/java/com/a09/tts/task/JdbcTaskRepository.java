@@ -297,8 +297,8 @@ public class JdbcTaskRepository implements TaskRepository {
     private Optional<TaskRecord> findActiveByDeduplication(
             String owner, String type, String deduplicationKey) {
         return query("""
-                WHERE owner_username = ? AND task_type = ? AND deduplication_key = ?
-                  AND status IN ('PENDING', 'RUNNING')
+                WHERE owner_username = ? AND task_type = ?
+                  AND active_deduplication_key = ?
                 """, owner, type, deduplicationKey);
     }
 

@@ -27,36 +27,33 @@ public interface VoiceMapper {
     @Options(useGeneratedKeys = true, keyProperty = "voiceId")
     public int addVoiceSample(Voice voice);
 
-    /**
-     * 根据声音样本名称查询样本信息（可以实现模糊查询）
-     *
-     * @param voiceName 声音样本名称
-     * @return 匹配的声音样本列表（支持重名或者多个匹配结果）
-     */
-    @Select("select voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+    @Select("(SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
             "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
-            "FROM voice where voice_name LIKE CONCAT('%', #{voiceName}, '%')")
-    public List<Voice> findVoiceByName(String voiceName);
-
-    @Select("select voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "FROM voice WHERE public_visible = 1 AND voice_name LIKE CONCAT('%', #{voiceName}, '%') " +
+            "ORDER BY created_at DESC, voice_id DESC LIMIT #{window}) UNION ALL " +
+            "(SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
             "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
-            "FROM voice WHERE voice_name LIKE CONCAT('%', #{voiceName}, '%') " +
-            "AND (public_visible = 1 OR owner_username = #{username})")
-    List<Voice> findVisibleVoiceByName(String voiceName, String username);
+            "FROM voice WHERE owner_username = #{username} AND public_visible = 0 " +
+            "AND voice_name LIKE CONCAT('%', #{voiceName}, '%') " +
+            "ORDER BY created_at DESC, voice_id DESC LIMIT #{window}) " +
+            "ORDER BY created_at DESC, voice_id DESC LIMIT #{limit} OFFSET #{offset}")
+    List<Voice> findVisibleVoiceByName(
+            @Param("voiceName") String voiceName, @Param("username") String username,
+            @Param("offset") int offset, @Param("limit") int limit,
+            @Param("window") long window);
 
-    /**
-     * 查询所有声音样本
-     *
-     * @return 声音样本的列表
-     */
-    @Select("SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
-            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at FROM voice")
-    public List<Voice> findAllVoices();
-
-    @Select("SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+    @Select("(SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
             "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
-            "FROM voice WHERE public_visible = 1 OR owner_username = #{username}")
-    List<Voice> findVisibleVoices(String username);
+            "FROM voice WHERE public_visible = 1 " +
+            "ORDER BY created_at DESC, voice_id DESC LIMIT #{window}) UNION ALL " +
+            "(SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
+            "FROM voice WHERE owner_username = #{username} AND public_visible = 0 " +
+            "ORDER BY created_at DESC, voice_id DESC LIMIT #{window}) " +
+            "ORDER BY created_at DESC, voice_id DESC LIMIT #{limit} OFFSET #{offset}")
+    List<Voice> findVisibleVoices(
+            @Param("username") String username, @Param("offset") int offset,
+            @Param("limit") int limit, @Param("window") long window);
 
     /**
      * 根据声音样本的 ID 删除声音样本

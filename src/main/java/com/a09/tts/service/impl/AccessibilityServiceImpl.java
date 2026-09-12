@@ -1,10 +1,12 @@
 package com.a09.tts.service.impl;
 
+import com.a09.tts.api.PageResult;
+import com.a09.tts.api.Pagination;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.security.UploadSecurityService.Type;
 import com.a09.tts.service.ASRService;
 import com.a09.tts.service.AccessibilityService;
 import com.a09.tts.service.MoonshotChatClient;
-import com.a09.tts.security.UploadSecurityService;
-import com.a09.tts.security.UploadSecurityService.Type;
 import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
 import com.a09.tts.storage.LocalObjectStorageService;
 import com.a09.tts.storage.ManagedObjectStorageService;
@@ -150,13 +152,18 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     /**
      * 获取所有语音笔记列表
      */
-    public Map<String, Object> listVoiceNotes(String owner) throws Exception {
+    public Map<String, Object> listVoiceNotes(
+            String owner, Integer pageValue, Integer sizeValue) throws Exception {
+        int page = Pagination.page(pageValue);
+        int size = Pagination.size(sizeValue);
         Map<String, Object> result = new HashMap<>();
         List<Map<String, String>> notesList = new ArrayList<>();
-        for (Metadata metadata : objectStorage.list(owner, ObjectStorageKeys.voiceNotePrefix(owner))) {
-            if (!metadata.objectKey().endsWith("/note.txt")) {
-                continue;
-            }
+        List<Metadata> metadataWindow = objectStorage.listEndingWith(
+                owner, ObjectStorageKeys.voiceNotePrefix(owner), "/note.txt",
+                Pagination.offset(page, size), size + 1);
+        PageResult<Metadata> metadataPage =
+                PageResult.fromWindow(metadataWindow, page, size);
+        for (Metadata metadata : metadataPage.content()) {
             try (var input = objectStorage.open(owner, metadata.objectKey())) {
                 Map<String, String> note = new HashMap<>();
                 note.put("fileName", metadata.objectKey());
@@ -166,10 +173,12 @@ public class AccessibilityServiceImpl implements AccessibilityService {
                 log.warn("读取笔记对象失败: {}", metadata.objectKey(), exception);
             }
         }
-
-        result.put("notes", notesList);
+        result.put("notes", List.copyOf(notesList));
+        result.put("page", metadataPage.page());
+        result.put("size", metadataPage.size());
+        result.put("hasNext", metadataPage.hasNext());
         result.put("total", notesList.size());
-        result.put("message", "共找到 " + notesList.size() + " 条语音笔记");
+        result.put("message", "本页找到 " + notesList.size() + " 条语音笔记");
         return result;
     }
 

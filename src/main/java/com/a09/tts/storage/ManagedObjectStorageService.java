@@ -97,9 +97,14 @@ public class ManagedObjectStorageService {
                 .orElseThrow(() -> new ResourceNotFoundException("存储对象不存在或无权访问"));
     }
 
-    public List<Metadata> list(String owner, String prefix) {
-        return metadataRepository.findByOwnerAndPrefix(
-                normalizeOwner(owner), ObjectStorageKeys.requirePrefix(prefix));
+    public List<Metadata> listEndingWith(
+            String owner, String prefix, String suffix, int offset, int limit) {
+        if (suffix == null || suffix.isEmpty() || offset < 0 || limit < 1) {
+            throw new IllegalArgumentException("对象列表分页参数无效");
+        }
+        return metadataRepository.findByOwnerAndPrefixAndSuffix(
+                normalizeOwner(owner), ObjectStorageKeys.requirePrefix(prefix),
+                suffix, offset, limit);
     }
 
     public long usedBytes(String owner) {

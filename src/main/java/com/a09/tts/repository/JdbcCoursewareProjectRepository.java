@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -90,13 +91,30 @@ public class JdbcCoursewareProjectRepository implements CoursewareProjectReposit
                         WHERE project_id = ?
                         ORDER BY revision_number
                         """,
-                (resultSet, rowNumber) -> new RevisionData(
-                        resultSet.getString("project_id"),
-                        resultSet.getInt("revision_number"),
-                        resultSet.getString("instruction"),
-                        resultSet.getString("script"),
-                        resultSet.getTimestamp("created_at").toInstant()),
+                this::mapRevision,
                 projectId);
+    }
+
+    @Override
+    public List<RevisionData> findRevisionsByProjectIds(List<String> projectIds) {
+        if (projectIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = String.join(",", Collections.nCopies(projectIds.size(), "?"));
+        return jdbcTemplate.query(
+                "SELECT project_id, revision_number, instruction, script, created_at "
+                        + "FROM courseware_project_revision WHERE project_id IN ("
+                        + placeholders + ") ORDER BY project_id, revision_number",
+                this::mapRevision, projectIds.toArray());
+    }
+
+    private RevisionData mapRevision(ResultSet resultSet, int rowNumber) throws SQLException {
+        return new RevisionData(
+                resultSet.getString("project_id"),
+                resultSet.getInt("revision_number"),
+                resultSet.getString("instruction"),
+                resultSet.getString("script"),
+                resultSet.getTimestamp("created_at").toInstant());
     }
 
     private ProjectData mapProject(ResultSet resultSet, int rowNumber) throws SQLException {

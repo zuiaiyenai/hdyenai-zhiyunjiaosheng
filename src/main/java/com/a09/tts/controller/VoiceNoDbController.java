@@ -1,5 +1,6 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.PageResult;
 import com.a09.tts.api.Pagination;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.security.UploadSecurityService;
@@ -66,8 +67,8 @@ public class VoiceNoDbController {
             @RequestParam(value = "page", required = false) Integer page,
             @RequestParam(value = "size", required = false) Integer size,
             HttpServletRequest request) {
-        List<Voice> visible = visibleVoices(request);
-        return page == null && size == null ? visible : Pagination.slice(visible, page, size);
+        PageResult<Voice> result = Pagination.slice(visibleVoices(request), page, size);
+        return page == null && size == null ? result.content() : result;
     }
 
     @GetMapping("/search")
@@ -81,7 +82,8 @@ public class VoiceNoDbController {
                 .filter(voice -> voice.getVoiceName() != null
                         && voice.getVoiceName().toLowerCase().contains(keyword))
                 .toList();
-        return page == null && size == null ? matches : Pagination.slice(matches, page, size);
+        PageResult<Voice> result = Pagination.slice(matches, page, size);
+        return page == null && size == null ? result.content() : result;
     }
 
     private List<Voice> visibleVoices(HttpServletRequest request) {

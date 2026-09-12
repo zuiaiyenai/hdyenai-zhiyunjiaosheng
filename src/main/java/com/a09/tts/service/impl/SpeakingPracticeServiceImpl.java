@@ -1,5 +1,7 @@
 package com.a09.tts.service.impl;
 
+import com.a09.tts.api.PageResult;
+import com.a09.tts.api.Pagination;
 import com.a09.tts.pojo.SpeakingPracticeHistory;
 import com.a09.tts.service.ASRService;
 import com.a09.tts.service.DialogueSessionStore;
@@ -302,29 +304,43 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
     /**
      * 获取历史评测记录
      */
-    public ResponseEntity<?> getHistory(String sessionId, String username) {
+    public ResponseEntity<?> getHistory(
+            String sessionId, String username, Integer pageValue, Integer sizeValue) {
         String owner = normalizeUsername(username);
+        int page = Pagination.page(pageValue);
+        int size = Pagination.size(sizeValue);
         SpeakingPracticeHistory history = historyByUser.computeIfAbsent(
                 owner, ignored -> new SpeakingPracticeHistory());
         if (jdbcTemplate == null) {
-            return ResponseEntity.ok(Map.of("history", history, "message", "数据库未连接，仅返回内存数据"));
+            return ResponseEntity.ok(Map.of(
+                    "history", history, "page", page, "size", size,
+                    "hasNext", false, "message", "数据库未连接，仅返回内存数据"));
         }
         try {
+            int offset = Pagination.offset(page, size);
             List<Map<String, Object>> records;
             if (sessionId == null || sessionId.isBlank()) {
                 records = jdbcTemplate.queryForList(
-                        "SELECT * FROM speaking_history WHERE username = ? ORDER BY created_at DESC LIMIT 20",
-                        owner);
+                        "SELECT * FROM speaking_history WHERE username = ? "
+                                + "ORDER BY created_at DESC, history_id DESC LIMIT ? OFFSET ?",
+                        owner, size + 1, offset);
             } else {
                 records = jdbcTemplate.queryForList(
                         "SELECT * FROM speaking_history WHERE session_id = ? AND username = ? " +
-                                "ORDER BY created_at DESC LIMIT 20",
-                        sessionId, owner);
+                                "ORDER BY created_at DESC, history_id DESC LIMIT ? OFFSET ?",
+                        sessionId, owner, size + 1, offset);
             }
-            return ResponseEntity.ok(Map.of("history", records, "total", records.size()));
+            PageResult<Map<String, Object>> result =
+                    PageResult.fromWindow(records, page, size);
+            return ResponseEntity.ok(Map.of(
+                    "history", result.content(), "total", result.content().size(),
+                    "page", result.page(), "size", result.size(),
+                    "hasNext", result.hasNext()));
         } catch (Exception e) {
             log.warn("获取历史记录失败: {}", e.getMessage());
-            return ResponseEntity.ok(Map.of("history", history, "message", e.getMessage()));
+            return ResponseEntity.ok(Map.of(
+                    "history", history, "page", page, "size", size,
+                    "hasNext", false, "message", e.getMessage()));
         }
     }
 

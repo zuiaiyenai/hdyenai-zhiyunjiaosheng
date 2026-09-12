@@ -1,16 +1,18 @@
 package com.a09.tts.controller;
 
-import com.a09.tts.mapper.VoiceMapper;
+import com.a09.tts.TestMediaFiles;
+import com.a09.tts.api.PageResult;
 import com.a09.tts.cleanup.PendingFileCleanupService;
+import com.a09.tts.mapper.VoiceMapper;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.service.VoiceService;
 import com.a09.tts.service.impl.VoiceServiceImpl;
 import com.a09.tts.util.UploadUtils;
-import com.a09.tts.TestMediaFiles;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.Resource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -19,7 +21,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.springframework.core.io.Resource;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -80,6 +82,26 @@ class VoiceLibrarySecurityTest {
         assertEquals(HttpStatus.GONE, controller.addVoice().getStatusCode());
         assertEquals(HttpStatus.NOT_FOUND,
                 controller.preview(7, requestFor("alice")).getStatusCode());
+    }
+
+    @Test
+    void databaseListPushesBoundedWindowIntoService() {
+        VoiceService service = mock(VoiceService.class);
+        VoiceController controller = new VoiceController();
+        ReflectionTestUtils.setField(controller, "voiceService", service);
+        List<Voice> window = List.of(
+                privateVoice(3, "alice", "3.wav"),
+                privateVoice(2, "alice", "2.wav"),
+                privateVoice(1, "alice", "1.wav"));
+        when(service.findVisibleVoices("alice", 0, 3)).thenReturn(window);
+
+        Object body = controller.listAllVoices(0, 2, requestFor("alice")).getBody();
+
+        assertTrue(body instanceof PageResult<?>);
+        PageResult<?> page = (PageResult<?>) body;
+        assertEquals(2, page.content().size());
+        assertTrue(page.hasNext());
+        verify(service).findVisibleVoices("alice", 0, 3);
     }
 
     @Test

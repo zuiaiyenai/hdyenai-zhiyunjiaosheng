@@ -2,6 +2,7 @@ package com.a09.tts;
 
 import com.a09.tts.pojo.User;
 import com.a09.tts.pojo.Voice;
+import com.a09.tts.service.SpeakingPracticeService;
 import com.a09.tts.service.UserService;
 import com.a09.tts.service.VoiceService;
 import org.flywaydb.core.Flyway;
@@ -48,7 +49,7 @@ class FlywayMySqlIntegrationTest {
                                 + "WHERE table_schema = DATABASE() "
                                 + "AND table_name IN ('user', 'voice', 'speaking_history')",
                         Integer.class));
-                assertEquals(7, jdbc.queryForObject(
+                assertEquals(9, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
 
                 UserService userService = first.getBean(UserService.class);
@@ -69,6 +70,10 @@ class FlywayMySqlIntegrationTest {
                 assertEquals((long) TestMediaFiles.wav().length, voice.getFileSize());
                 assertNotNull(voice.getChecksumSha256());
                 voiceId = voice.getVoiceId();
+                assertEquals(voiceId, voiceService.findVisibleVoices(
+                        "phase2_user", 0, 21).get(0).getVoiceId());
+                assertEquals(voiceId, voiceService.findVisibleVoiceByName(
+                        "Phase 2", "phase2_user", 0, 21).get(0).getVoiceId());
 
                 assertEquals(1, jdbc.update(
                         "INSERT INTO speaking_history "
@@ -77,6 +82,10 @@ class FlywayMySqlIntegrationTest {
                                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         "phase2-session", "phase2_user", "hello", "hello",
                         100, 100, 100, 100, "", "ok", "standard", "en"));
+                Object history = first.getBean(SpeakingPracticeService.class)
+                        .getHistory(null, "phase2_user", 0, 20).getBody();
+                assertTrue(history instanceof java.util.Map<?, ?>);
+                assertFalse((Boolean) ((java.util.Map<?, ?>) history).get("hasNext"));
             }
 
             try (ConfigurableApplicationContext second = start(url, username, password)) {
@@ -94,7 +103,7 @@ class FlywayMySqlIntegrationTest {
                 assertEquals(1, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM speaking_history WHERE session_id = 'phase2-session'",
                         Integer.class));
-                assertEquals(7, jdbc.queryForObject(
+                assertEquals(9, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
             }
         } finally {

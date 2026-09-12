@@ -75,13 +75,13 @@ class CoursewarePersistenceMySqlIntegrationTest {
                     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     123, "a".repeat(64), "alice", now));
             assertEquals(123, objects.sumSizeByOwner("alice"));
-            assertEquals(1, objects.findByOwnerAndPrefix(
-                    "alice", "courseware/owner/project/").size());
+            assertEquals(1, objects.findByOwnerAndPrefixAndSuffix(
+                    "alice", "courseware/owner/project/", ".pptx", 0, 20).size());
             assertFalse(objects.findByKeyAndOwner(
                     "courseware/owner/project/source.pptx", "bob").isPresent());
             objects.delete("courseware/owner/project/source.pptx", "alice");
             assertEquals(0, objects.sumSizeByOwner("alice"));
-            assertEquals(7, jdbc.queryForObject(
+            assertEquals(9, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
         } finally {
             flyway.clean();

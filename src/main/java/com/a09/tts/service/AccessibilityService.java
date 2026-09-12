@@ -14,7 +14,8 @@ public interface AccessibilityService {
             String audioObjectKey, String originalFilename, String title,
             String owner, String noteId) throws Exception;
 
-    Map<String, Object> listVoiceNotes(String owner) throws Exception;
+    Map<String, Object> listVoiceNotes(
+            String owner, Integer page, Integer size) throws Exception;
 
     Map<String, Object> generateStudySummary(String textContent);
 

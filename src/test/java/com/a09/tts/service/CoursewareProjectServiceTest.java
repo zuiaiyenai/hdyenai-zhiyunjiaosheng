@@ -1,6 +1,8 @@
 package com.a09.tts.service;
 
 import com.a09.tts.repository.CoursewareProjectRepository.ProjectData;
+import com.a09.tts.repository.CoursewareProjectRepository;
+import com.a09.tts.repository.CoursewareProjectRepository.RevisionData;
 import com.a09.tts.repository.InMemoryCoursewareProjectRepository;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
@@ -23,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.time.Instant;
 import java.nio.file.Path;
 import java.util.zip.ZipFile;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -31,8 +34,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CoursewareProjectServiceTest {
@@ -216,13 +222,33 @@ class CoursewareProjectServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.list("alice", 0, 101));
     }
 
+    @Test
+    void loadsListRevisionsWithOneBatchQuery() {
+        CoursewareProjectRepository repository = mock(CoursewareProjectRepository.class);
+        Instant now = Instant.now();
+        ProjectData first = projectData("00000000-0000-0000-0000-000000000071", now);
+        ProjectData second = projectData("00000000-0000-0000-0000-000000000072", now.minusSeconds(1));
+        when(repository.findByOwner("alice", 0, 21)).thenReturn(List.of(first, second));
+        when(repository.findRevisionsByProjectIds(anyList())).thenReturn(List.of(
+                new RevisionData(first.projectId(), 0, "自动生成", "讲稿", now),
+                new RevisionData(second.projectId(), 0, "自动生成", "讲稿", now)));
+        CoursewareProjectService service = service(mock(PPTService.class), repository);
+
+        PageResult<ProjectView> result = service.list("alice", 0, 20);
+
+        assertEquals(2, result.content().size());
+        verify(repository).findRevisionsByProjectIds(
+                List.of(first.projectId(), second.projectId()));
+        verify(repository, never()).findRevisions(anyString());
+    }
+
     private CoursewareProjectService service(PPTService pptService,
-                                             InMemoryCoursewareProjectRepository repository) {
+                                             CoursewareProjectRepository repository) {
         return service(pptService, mock(TTSService.class), repository);
     }
 
     private CoursewareProjectService service(PPTService pptService, TTSService ttsService,
-                                             InMemoryCoursewareProjectRepository repository) {
+                                             CoursewareProjectRepository repository) {
         CoursewareProjectService service = new CoursewareProjectService(
                 pptService, ttsService, new UploadSecurityService(), repository,
                 new ManagedObjectStorageService(
@@ -232,6 +258,15 @@ class CoursewareProjectServiceTest {
         ReflectionTestUtils.setField(service, "ffmpegPath", "ffmpeg");
         ReflectionTestUtils.setField(service, "ffprobePath", "ffprobe");
         return service;
+    }
+
+    private ProjectData projectData(String id, Instant updatedAt) {
+        return new ProjectData(
+                id, "alice", "容量课件", "SUCCEEDED",
+                "courseware/alice/" + id + "/source.pptx",
+                "courseware/alice/" + id, "source.pptx", "讲稿", 0,
+                "longxiao", 1.0, 1.0, 1.0, null, null, null, null,
+                updatedAt, updatedAt);
     }
 
     private byte[] pptx() throws Exception {

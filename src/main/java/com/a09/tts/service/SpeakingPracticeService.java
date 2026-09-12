@@ -9,7 +9,8 @@ public interface SpeakingPracticeService {
     ResponseEntity<?> evaluate(String audioFilePath, String referenceText, String mode,
                                String sessionId, String language, String username);
 
-    ResponseEntity<?> getHistory(String sessionId, String username);
+    ResponseEntity<?> getHistory(
+            String sessionId, String username, Integer page, Integer size);
 
     ResponseEntity<?> getDialogueScenarios();
 

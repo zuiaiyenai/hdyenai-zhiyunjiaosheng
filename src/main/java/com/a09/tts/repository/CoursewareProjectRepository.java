@@ -15,6 +15,8 @@ public interface CoursewareProjectRepository {
 
     List<RevisionData> findRevisions(String projectId);
 
+    List<RevisionData> findRevisionsByProjectIds(List<String> projectIds);
+
     record ProjectData(
             String projectId,
             String owner,

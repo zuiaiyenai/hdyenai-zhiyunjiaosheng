@@ -51,10 +51,13 @@ public class AccessibilityController {
      * 获取语音笔记列表
      */
     @GetMapping("/voice-notes")
-    public ResponseEntity<Map<String, Object>> listVoiceNotes(HttpServletRequest request) throws Exception {
+    public ResponseEntity<Map<String, Object>> listVoiceNotes(
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
+            HttpServletRequest request) throws Exception {
         Object username = request.getAttribute("username");
         return ResponseEntity.ok(accessibilityService.listVoiceNotes(
-                username == null ? "anonymous" : username.toString()));
+                username == null ? "anonymous" : username.toString(), page, size));
     }
 
     /**

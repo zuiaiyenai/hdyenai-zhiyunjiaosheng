@@ -1,5 +1,6 @@
 package com.a09.tts.controller;
 
+import com.a09.tts.api.PageResult;
 import com.a09.tts.api.Pagination;
 
 import org.slf4j.Logger;
@@ -50,9 +51,12 @@ public class VoiceController {
             @RequestParam(value = "page", required = false) Integer page,
             @RequestParam(value = "size", required = false) Integer size,
             HttpServletRequest request) {
-        List<Voice> voices = voiceService.findVisibleVoices(username(request));
-        return ResponseEntity.ok(page == null && size == null
-                ? voices : Pagination.slice(voices, page, size));
+        int pageNumber = Pagination.page(page);
+        int pageSize = Pagination.size(size);
+        List<Voice> window = voiceService.findVisibleVoices(
+                username(request), Pagination.offset(pageNumber, pageSize), pageSize + 1);
+        PageResult<Voice> result = PageResult.fromWindow(window, pageNumber, pageSize);
+        return ResponseEntity.ok(page == null && size == null ? result.content() : result);
     }
 
     @GetMapping("/search")
@@ -61,9 +65,12 @@ public class VoiceController {
             @RequestParam(value = "page", required = false) Integer page,
             @RequestParam(value = "size", required = false) Integer size,
             HttpServletRequest request) {
-        List<Voice> voices = voiceService.findVisibleVoiceByName(name, username(request));
-        return ResponseEntity.ok(page == null && size == null
-                ? voices : Pagination.slice(voices, page, size));
+        int pageNumber = Pagination.page(page);
+        int pageSize = Pagination.size(size);
+        List<Voice> window = voiceService.findVisibleVoiceByName(
+                name, username(request), Pagination.offset(pageNumber, pageSize), pageSize + 1);
+        PageResult<Voice> result = PageResult.fromWindow(window, pageNumber, pageSize);
+        return ResponseEntity.ok(page == null && size == null ? result.content() : result);
     }
 
     @PostMapping("/add")

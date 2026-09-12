@@ -38,22 +38,16 @@ public class VoiceServiceImpl implements VoiceService {
     @Autowired
     private PendingFileCleanupService pendingFileCleanupService;
 
-    public List<Voice> findVoiceByName(String voiceName) {
-        return voiceMapper.findVoiceByName(voiceName);
+    public List<Voice> findVisibleVoiceByName(
+            String voiceName, String username, int offset, int limit) {
+        return voiceMapper.findVisibleVoiceByName(
+                voiceName, username, offset, limit, (long) offset + limit);
     }
 
-    public List<Voice> findVisibleVoiceByName(String voiceName, String username) {
-        return voiceMapper.findVisibleVoiceByName(voiceName, username);
-    }
-
-    @Cacheable("voiceList")
-    public List<Voice> findAllVoices() {
-        return voiceMapper.findAllVoices();
-    }
-
-    @Cacheable(value = "voiceList", key = "#username")
-    public List<Voice> findVisibleVoices(String username) {
-        return voiceMapper.findVisibleVoices(username);
+    @Cacheable(value = "voiceList", key = "#username + ':' + #offset + ':' + #limit")
+    public List<Voice> findVisibleVoices(String username, int offset, int limit) {
+        return voiceMapper.findVisibleVoices(
+                username, offset, limit, (long) offset + limit);
     }
 
     @Caching(evict = {

@@ -54,8 +54,11 @@ public class SpeakingPracticeController {
     @GetMapping("/history")
     public ResponseEntity<?> getHistory(
             @RequestParam(value = "sessionId", required = false) String sessionId,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
             HttpServletRequest request) throws Exception {
-        return speakingPracticeService.getHistory(sessionId, currentUsername(request));
+        return speakingPracticeService.getHistory(
+                sessionId, currentUsername(request), page, size);
     }
 
     @GetMapping("/dialogue/scenarios")

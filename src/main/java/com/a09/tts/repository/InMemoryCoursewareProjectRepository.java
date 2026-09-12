@@ -50,4 +50,11 @@ public class InMemoryCoursewareProjectRepository implements CoursewareProjectRep
                 .sorted(Comparator.comparingInt(RevisionData::revisionNumber))
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
     }
+
+    @Override
+    public List<RevisionData> findRevisionsByProjectIds(List<String> projectIds) {
+        return projectIds.stream()
+                .flatMap(projectId -> findRevisions(projectId).stream())
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    }
 }

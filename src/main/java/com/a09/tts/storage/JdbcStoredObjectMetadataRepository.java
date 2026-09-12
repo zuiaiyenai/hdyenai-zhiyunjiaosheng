@@ -52,12 +52,14 @@ public class JdbcStoredObjectMetadataRepository implements StoredObjectMetadataR
     }
 
     @Override
-    public List<Metadata> findByOwnerAndPrefix(String owner, String prefix) {
+    public List<Metadata> findByOwnerAndPrefixAndSuffix(
+            String owner, String prefix, String suffix, int offset, int limit) {
         return jdbcTemplate.query(
                 "SELECT " + COLUMNS + " FROM stored_object_metadata "
                         + "WHERE owner_username = ? AND object_key LIKE ? "
-                        + "ORDER BY created_at DESC, object_key DESC",
-                this::map, owner, prefix + "%");
+                        + "AND object_key LIKE ? "
+                        + "ORDER BY created_at DESC, object_key DESC LIMIT ? OFFSET ?",
+                this::map, owner, prefix + "%", "%" + suffix, limit, offset);
     }
 
     @Override

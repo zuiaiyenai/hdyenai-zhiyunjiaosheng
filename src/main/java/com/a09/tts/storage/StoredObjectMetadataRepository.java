@@ -9,7 +9,8 @@ public interface StoredObjectMetadataRepository {
 
     Optional<Metadata> findByKeyAndOwner(String objectKey, String owner);
 
-    List<Metadata> findByOwnerAndPrefix(String owner, String prefix);
+    List<Metadata> findByOwnerAndPrefixAndSuffix(
+            String owner, String prefix, String suffix, int offset, int limit);
 
     long sumSizeByOwner(String owner);
 

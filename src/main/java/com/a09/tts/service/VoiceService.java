@@ -7,13 +7,10 @@ import java.util.List;
 
 public interface VoiceService {
 
-    List<Voice> findVoiceByName(String voiceName);
+    List<Voice> findVisibleVoiceByName(
+            String voiceName, String username, int offset, int limit);
 
-    List<Voice> findVisibleVoiceByName(String voiceName, String username);
-
-    List<Voice> findAllVoices();
-
-    List<Voice> findVisibleVoices(String username);
+    List<Voice> findVisibleVoices(String username, int offset, int limit);
 
     int deleteVoiceById(int voiceId);
 
