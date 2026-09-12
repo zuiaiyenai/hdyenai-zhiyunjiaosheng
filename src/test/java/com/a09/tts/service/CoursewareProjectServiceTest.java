@@ -43,6 +43,26 @@ class CoursewareProjectServiceTest {
             new InMemoryStoredObjectMetadataRepository();
 
     @Test
+    void preparesUploadThenGeneratesInitialScriptFromStoredWorkingCopy() throws Exception {
+        PPTService pptService = mock(PPTService.class);
+        when(pptService.processPptAndGenerateContent(
+                any(Path.class), eq("异步课件.pptx"))).thenReturn("异步生成讲稿");
+        CoursewareProjectService service = service(
+                pptService, new InMemoryCoursewareProjectRepository());
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "异步课件.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                pptx());
+
+        ProjectView prepared = service.prepare(file, "alice");
+        ProjectView completed = service.processPrepared(prepared.id(), "alice");
+
+        assertEquals("PENDING", prepared.status());
+        assertEquals("SUCCEEDED", completed.status());
+        assertEquals("异步生成讲稿", completed.script());
+    }
+
+    @Test
     void keepsScriptRevisionsScopesOwnerAndPackagesGeneratedAudio() throws Exception {
         PPTService pptService = mock(PPTService.class);
         TTSService ttsService = mock(TTSService.class);

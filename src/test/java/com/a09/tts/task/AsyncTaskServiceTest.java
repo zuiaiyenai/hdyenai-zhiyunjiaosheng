@@ -11,8 +11,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -104,6 +106,76 @@ class AsyncTaskServiceTest {
                     cancelService.get(submitted.taskId(), "alice").status());
         } finally {
             cancelService.shutdown();
+        }
+    }
+
+    @Test
+    void cleansCancelledTasksOnlyAfterRunningWorkExits() throws Exception {
+        AsyncTaskService service = service(
+                new InMemoryTaskRepository(), 1, 1, 2, Duration.ofSeconds(5), 2);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch cleaned = new CountDownLatch(1);
+        AtomicInteger cleanupCalls = new AtomicInteger();
+        try {
+            TaskSubmission task = service.submit("alice", "MEDIA", null, () -> {
+                started.countDown();
+                boolean waiting = true;
+                while (waiting) {
+                    try {
+                        release.await();
+                        waiting = false;
+                    } catch (InterruptedException ignored) {
+                        // Simulate an external library that does not stop immediately on interrupt.
+                    }
+                }
+                return "late";
+            }, () -> {
+                cleanupCalls.incrementAndGet();
+                cleaned.countDown();
+            });
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+
+            service.cancel(task.taskId(), "alice");
+
+            assertFalse(cleaned.await(100, TimeUnit.MILLISECONDS));
+            release.countDown();
+            assertTrue(cleaned.await(1, TimeUnit.SECONDS));
+            assertEquals(1, cleanupCalls.get());
+        } finally {
+            release.countDown();
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void cleansCancelledQueuedTaskExactlyOnce() throws Exception {
+        AsyncTaskService service = service(
+                new InMemoryTaskRepository(), 1, 1, 2, Duration.ofSeconds(5), 2);
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch cleaned = new CountDownLatch(1);
+        AtomicInteger cleanupCalls = new AtomicInteger();
+        try {
+            TaskSubmission blocker = service.submit("alice", "BLOCKER", null, () -> {
+                running.countDown();
+                release.await();
+                return "done";
+            });
+            assertTrue(running.await(1, TimeUnit.SECONDS));
+            TaskSubmission queued = service.submit("bob", "QUEUED", null, () -> "unused", () -> {
+                cleanupCalls.incrementAndGet();
+                cleaned.countDown();
+            });
+
+            service.cancel(queued.taskId(), "bob");
+
+            assertTrue(cleaned.await(1, TimeUnit.SECONDS));
+            assertEquals(1, cleanupCalls.get());
+            service.cancel(blocker.taskId(), "alice");
+        } finally {
+            release.countDown();
+            service.shutdown();
         }
     }
 

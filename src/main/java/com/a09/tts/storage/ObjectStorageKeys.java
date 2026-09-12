@@ -40,6 +40,16 @@ public final class ObjectStorageKeys {
         return "voice_notes/" + ownerKey(owner) + "/";
     }
 
+    public static String taskInput(
+            String owner, String taskUploadId, String originalFilename) {
+        return taskArtifact(owner, taskUploadId, "input" + extension(originalFilename));
+    }
+
+    public static String taskArtifact(String owner, String taskUploadId, String filename) {
+        return "tasks/" + ownerKey(owner) + "/" + safeSegment(taskUploadId)
+                + "/" + safeSegment(filename);
+    }
+
     public static String requireValid(String objectKey) {
         if (objectKey == null || objectKey.isBlank() || objectKey.length() > 512
                 || objectKey.startsWith("/") || objectKey.startsWith("\\")

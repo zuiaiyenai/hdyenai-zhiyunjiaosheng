@@ -43,8 +43,17 @@ public class CoursewareProjectController {
     }
 
     @PostMapping
-    public ProjectView create(@RequestParam("file") MultipartFile file) throws IOException {
-        return projectService.create(file, currentUsername());
+    public ResponseEntity<TaskSubmission> create(@RequestParam("file") MultipartFile file)
+            throws IOException {
+        String owner = currentUsername();
+        ProjectView project = projectService.prepare(file, owner);
+        try {
+            return submit(() -> taskService.submit(owner, "COURSEWARE_CREATE", project.id(),
+                    () -> projectService.processPrepared(project.id(), owner).id()));
+        } catch (RuntimeException exception) {
+            projectService.failPreparedSubmission(project.id(), owner, "课件生成任务提交失败");
+            throw exception;
+        }
     }
 
     @GetMapping("/{id}")
@@ -60,9 +69,9 @@ public class CoursewareProjectController {
     }
 
     @PostMapping("/{id}/optimize")
-    public ProjectView optimize(@PathVariable String id, @RequestBody OptimizeRequest request)
-            throws IOException {
-        return projectService.optimize(id, currentUsername(), request.instruction());
+    public ResponseEntity<TaskSubmission> optimize(
+            @PathVariable String id, @RequestBody OptimizeRequest request) {
+        return optimizeTask(id, request);
     }
 
     @PutMapping("/{id}/script")
@@ -72,10 +81,9 @@ public class CoursewareProjectController {
     }
 
     @PostMapping("/{id}/audio")
-    public ProjectView generateAudio(@PathVariable String id, @RequestBody AudioRequest request)
-            throws IOException {
-        return projectService.generateAudio(id, currentUsername(), request.voice(),
-                effective(request.speed()), effective(request.pitch()), effective(request.rhythm()));
+    public ResponseEntity<TaskSubmission> generateAudio(
+            @PathVariable String id, @RequestBody AudioRequest request) {
+        return generateAudioTask(id, request);
     }
 
     @PostMapping("/{id}/avatar")
@@ -85,8 +93,8 @@ public class CoursewareProjectController {
     }
 
     @PostMapping("/{id}/video")
-    public ProjectView generateVideo(@PathVariable String id) throws IOException {
-        return projectService.generateVideo(id, currentUsername());
+    public ResponseEntity<TaskSubmission> generateVideo(@PathVariable String id) {
+        return generateVideoTask(id);
     }
 
     @PostMapping("/{id}/optimize/tasks")

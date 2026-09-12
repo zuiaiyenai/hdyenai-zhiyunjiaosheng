@@ -52,6 +52,27 @@ export async function streamRequest(path, options = {}) {
   return response
 }
 
+export async function submitTask(path, options = {}) {
+  const submission = await request(path, options)
+  if (!submission?.taskId) throw new Error('任务提交失败：未返回 taskId')
+  const deadline = Date.now() + 16 * 60 * 1000
+  let delay = 1000
+  while (Date.now() < deadline) {
+    const task = await request(`/api/tasks/${encodeURIComponent(submission.taskId)}`)
+    if (task.status === 'SUCCESS') return task
+    if (['FAILED', 'CANCELLED', 'TIMEOUT'].includes(task.status)) {
+      throw new Error(task.errorMessage || `任务${task.status}`)
+    }
+    await new Promise(resolve => setTimeout(resolve, delay))
+    delay = Math.min(5000, delay + 1000)
+  }
+  throw new Error('任务状态查询超时，请稍后重试')
+}
+
+export function taskResult(taskId) {
+  return request(`/api/tasks/${encodeURIComponent(taskId)}/result`)
+}
+
 export function multipart(entries) {
   const data = new FormData()
   entries.forEach(([key, value]) => data.append(key, value))

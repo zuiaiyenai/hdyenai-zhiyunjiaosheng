@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -13,6 +15,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
 
@@ -43,28 +46,35 @@ public class PPTServiceImpl implements PPTService {
     }
 
     public String processPptAndGenerateContent(MultipartFile file) throws IOException {
-        String fileId = uploadFile(file);
+        String fileId = uploadFile(new org.springframework.core.io.ByteArrayResource(file.getBytes()) {
+            @Override
+            public String getFilename() {
+                return file.getOriginalFilename();
+            }
+        }, file.getOriginalFilename());
         String fileContent = getFileContent(fileId);
         return generateCoursewareContent(fileContent);
     }
 
-    private String uploadFile(MultipartFile file) throws IOException {
+    @Override
+    public String processPptAndGenerateContent(Path file, String originalFilename) throws IOException {
+        String fileId = uploadFile(new FileSystemResource(file), originalFilename);
+        String fileContent = getFileContent(fileId);
+        return generateCoursewareContent(fileContent);
+    }
+
+    private String uploadFile(Resource file, String originalFilename) throws IOException {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         headers.setBearerAuth(apiKey);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", new org.springframework.core.io.ByteArrayResource(file.getBytes()) {
-            @Override
-            public String getFilename() {
-                return file.getOriginalFilename();
-            }
-        });
+        body.add("file", file);
         body.add("purpose", "file-extract");
 
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
         try {
-            log.info("上传文件到 Moonshot: {}", file.getOriginalFilename());
+            log.info("上传文件到 Moonshot: {}", originalFilename);
             ResponseEntity<Map> response = restTemplate.postForEntity(
                     baseUrl + "/files", requestEntity, Map.class);
             return (String) response.getBody().get("id");

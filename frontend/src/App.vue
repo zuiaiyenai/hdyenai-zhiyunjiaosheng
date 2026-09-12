@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import AppHeader from './components/AppHeader.vue'
 import LoginModal from './components/LoginModal.vue'
-import { connection, multipart, request, streamRequest } from './services/api'
+import { connection, multipart, request, streamRequest, submitTask, taskResult } from './services/api'
 
 const page = ref('home')
 const loginOpen = ref(!connection.token)
@@ -167,10 +167,11 @@ async function synthesize() {
 }
 async function cloneVoice() {
   if (!clone.value.file || !clone.value.promptText || !clone.value.text) throw new Error('请完整填写参考音频、参考文本和合成文本')
-  const blob = await request('/sound_clone/upload', { method: 'POST', body: multipart([
+  const task = await submitTask('/sound_clone/upload', { method: 'POST', body: multipart([
     ['prompt_text', clone.value.promptText], ['prompt_lang', clone.value.promptLang],
     ['text', clone.value.text], ['text_lang', clone.value.lang], ['audioFile', clone.value.file]
   ]) })
+  const blob = await taskResult(task.id)
   clone.value.audio = blobUrl(blob)
   notify('克隆语音生成完成')
 }
@@ -187,15 +188,17 @@ async function parseFile() {
 }
 async function transcribe() {
   if (!asrFile.value) throw new Error('请选择音频文件')
-  const data = await request('/asr/transcribe', { method: 'POST', body: multipart([['file', asrFile.value], ['language', 'zh']]) })
+  const task = await submitTask('/asr/transcribe', { method: 'POST', body: multipart([['file', asrFile.value], ['language', 'zh']]) })
+  const data = await taskResult(task.id)
   asrResult.value = `识别文本：${data.text || ''}\n流利度：${data.fluency ?? '-'}\n发音：${data.pronunciation ?? '-'}\n准确度：${data.accuracy ?? '-'}`
 }
 async function saveVoiceNote() {
   if (!noteFile.value) throw new Error('请选择语音笔记录音')
-  const data = await request('/accessibility/voice-note', {
+  const task = await submitTask('/accessibility/voice-note', {
     method: 'POST',
     body: multipart([['audio', noteFile.value], ['title', noteTitle.value || '未命名笔记']])
   })
+  const data = await taskResult(task.id)
   noteResult.value = data.text || data.content || data.msg || JSON.stringify(data, null, 2)
   notify('语音笔记已保存')
   await loadNotes()
@@ -206,12 +209,15 @@ async function loadNotes() {
 }
 async function handlePpt(read = false) {
   if (!pptFile.value) throw new Error('请选择 PPT 文件')
-  const data = await request(read ? '/accessibility/read-ppt' : '/courseware/summary', { method: 'POST', body: multipart([['file', pptFile.value]]) })
+  const data = read
+    ? await request('/accessibility/read-ppt', { method: 'POST', body: multipart([['file', pptFile.value]]) })
+    : await taskResult((await submitTask('/courseware/summary', { method: 'POST', body: multipart([['file', pptFile.value]]) })).id)
   pptResult.value = typeof data === 'string' ? data : (data.text || data.summary || JSON.stringify(data, null, 2))
 }
 async function processVideo() {
   if (!videoFile.value) throw new Error('请选择视频')
-  const data = await request('/video_voice_swap/process', { method: 'POST', body: multipart([['video', videoFile.value], ['voiceType', voice.value]]) })
+  const task = await submitTask('/video_voice_swap/process', { method: 'POST', body: multipart([['video', videoFile.value], ['voiceType', voice.value]]) })
+  const data = await taskResult(task.id)
   if (data instanceof Blob) videoUrl.value = blobUrl(data)
   notify('视频处理完成')
 }
@@ -223,9 +229,10 @@ async function startDialogue() {
 }
 async function evaluate() {
   if (!speakingFile.value || !speakingText.value.trim()) throw new Error('请填写参考文本并上传录音')
-  const data = await request('/speaking_practice/evaluate', { method: 'POST', body: multipart([
+  const task = await submitTask('/speaking_practice/evaluate', { method: 'POST', body: multipart([
     ['file', speakingFile.value], ['text', speakingText.value], ['mode', 'standard'], ['language', 'zh']
   ]) })
+  const data = await taskResult(task.id)
   speakingResult.value = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
 }
 async function loadReport() {

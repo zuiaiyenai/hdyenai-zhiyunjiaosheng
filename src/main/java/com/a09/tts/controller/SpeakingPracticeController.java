@@ -3,16 +3,14 @@ package com.a09.tts.controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.a09.tts.service.SpeakingPracticeService;
-import com.a09.tts.security.UploadSecurityService;
-import com.a09.tts.security.UploadSecurityService.Type;
-import org.springframework.beans.factory.annotation.Value;
+import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import com.a09.tts.task.MediaTaskService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import jakarta.servlet.http.HttpServletRequest;
 
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Map;
 
 @RestController
@@ -21,16 +19,13 @@ public class SpeakingPracticeController {
 
     private static final Logger log = LoggerFactory.getLogger(SpeakingPracticeController.class);
 
-    @Value("${app.speaking-dir:uploads/speaking}")
-    private String speakingDir;
-
     private final SpeakingPracticeService speakingPracticeService;
-    private final UploadSecurityService uploadSecurity;
+    private final MediaTaskService mediaTasks;
 
     public SpeakingPracticeController(SpeakingPracticeService speakingPracticeService,
-                                      UploadSecurityService uploadSecurity) {
+                                      MediaTaskService mediaTasks) {
         this.speakingPracticeService = speakingPracticeService;
-        this.uploadSecurity = uploadSecurity;
+        this.mediaTasks = mediaTasks;
     }
 
     @GetMapping("/example")
@@ -39,7 +34,7 @@ public class SpeakingPracticeController {
     }
 
     @PostMapping("/evaluate")
-    public ResponseEntity<?> evaluateSpeaking(
+    public ResponseEntity<TaskSubmission> evaluateSpeaking(
             @RequestParam("file") MultipartFile file,
             @RequestParam("text") String text,
             @RequestParam(value = "mode", defaultValue = "standard") String mode,
@@ -51,14 +46,9 @@ public class SpeakingPracticeController {
             throw new IllegalArgumentException("音频文件为空！");
         }
         log.info("评测请求 - 语言: {} | 模式: {} | 会话: {}", language, mode, sessionId);
-        Path audioFilePath = uploadSecurity.save(file, Paths.get(speakingDir), Type.AUDIO,
-                currentUsername(request));
-        try {
-            return speakingPracticeService.evaluate(
-                    audioFilePath.toString(), text, mode, sessionId, language, currentUsername(request));
-        } finally {
-            uploadSecurity.delete(Paths.get(speakingDir), audioFilePath);
-        }
+        TaskSubmission submission = mediaTasks.submitSpeakingEvaluation(
+                file, text, mode, sessionId, language, currentUsername(request));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(submission);
     }
 
     @GetMapping("/history")

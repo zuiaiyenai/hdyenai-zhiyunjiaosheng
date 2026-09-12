@@ -2,10 +2,10 @@ package com.a09.tts.controller;
 
 
 
-import com.a09.tts.service.PPTService;
-import com.a09.tts.security.UploadSecurityService;
-import com.a09.tts.security.UploadSecurityService.Type;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import com.a09.tts.task.MediaTaskService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,18 +23,20 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/courseware")
 public class PPTController {
+    private final MediaTaskService mediaTasks;
 
-    @Autowired
-    private PPTService pptService;
-
-    @Autowired
-    private UploadSecurityService uploadSecurity;
+    public PPTController(MediaTaskService mediaTasks) {
+        this.mediaTasks = mediaTasks;
+    }
 
     @PostMapping("/summary")
-    public ResponseEntity<String> summary(@RequestParam("file") MultipartFile file) throws Exception {
-        uploadSecurity.validate(file, Type.PRESENTATION);
-        String result = pptService.processPptAndGenerateContent(file);
-        return ResponseEntity.ok(result);
+    public ResponseEntity<TaskSubmission> summary(
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) throws Exception {
+        Object username = request.getAttribute("username");
+        TaskSubmission submission = mediaTasks.submitPptSummary(
+                file, username == null ? "anonymous" : username.toString());
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(submission);
     }
 
 }

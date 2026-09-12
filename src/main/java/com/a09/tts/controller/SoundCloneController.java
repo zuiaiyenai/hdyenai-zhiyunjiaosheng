@@ -1,10 +1,9 @@
 package com.a09.tts.controller;
 
 import com.a09.tts.api.ServiceUnavailableException;
-import com.a09.tts.service.SoundCloneService;
 import com.a09.tts.service.AliyunSpeechService;
-import com.a09.tts.security.UploadSecurityService;
-import com.a09.tts.security.UploadSecurityService.Type;
+import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import com.a09.tts.task.MediaTaskService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,11 +21,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
-
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.charset.StandardCharsets;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.Socket;
@@ -37,22 +31,16 @@ import java.util.Map;
 public class SoundCloneController {
     private static final Logger log = LoggerFactory.getLogger(SoundCloneController.class);
 
-    @Value("${app.upload-dir}")
-    private String uploadDir;
-
     @Value("${sound-clone.api.url}")
     private String localApiUrl;
 
-    private final SoundCloneService soundCloneService;
     private final AliyunSpeechService aliyunSpeechService;
-    private final UploadSecurityService uploadSecurity;
+    private final MediaTaskService mediaTasks;
 
-    public SoundCloneController(SoundCloneService soundCloneService,
-                                AliyunSpeechService aliyunSpeechService,
-                                UploadSecurityService uploadSecurity) {
-        this.soundCloneService = soundCloneService;
+    public SoundCloneController(AliyunSpeechService aliyunSpeechService,
+                                MediaTaskService mediaTasks) {
         this.aliyunSpeechService = aliyunSpeechService;
-        this.uploadSecurity = uploadSecurity;
+        this.mediaTasks = mediaTasks;
     }
 
     @GetMapping("/capabilities")
@@ -100,71 +88,27 @@ public class SoundCloneController {
     }
 
     @PostMapping("/upload")
-    public ResponseEntity<StreamingResponseBody> soundClone(
+    public ResponseEntity<TaskSubmission> soundClone(
             @RequestParam("prompt_text") String promptText,
             @RequestParam("prompt_lang") String promptLang,
             @RequestParam("text") String text,
             @RequestParam("text_lang") String textLang,
             @RequestParam("audioFile") MultipartFile audioFile,
-            HttpServletRequest request) {
-        Path audioFilePath = null;
-        try {
-            if (audioFile.isEmpty()) {
-                return textResponse(HttpStatus.BAD_REQUEST, "音频文件为空！");
-            }
-            if (text == null || text.isBlank()) {
-                return textResponse(HttpStatus.BAD_REQUEST, "合成文本不能为空！");
-            }
-
-            audioFilePath = uploadSecurity.save(audioFile, Paths.get(uploadDir), Type.AUDIO,
-                    username(request));
-            Path savedAudioPath = audioFilePath;
-            ResponseEntity<StreamingResponseBody> response = soundCloneService.soundClone(
-                    promptText, promptLang, text, textLang, savedAudioPath.toString());
-            StreamingResponseBody upstreamBody = response.getBody();
-            if (!response.getStatusCode().is2xxSuccessful() || upstreamBody == null) {
-                deleteQuietly(savedAudioPath);
-                return new ResponseEntity<>(HttpStatus.SERVICE_UNAVAILABLE);
-            }
-
-            StreamingResponseBody cleaningBody = outputStream -> {
-                try {
-                    upstreamBody.writeTo(outputStream);
-                } finally {
-                    deleteQuietly(savedAudioPath);
-                }
-            };
-            return new ResponseEntity<>(cleaningBody, response.getHeaders(), response.getStatusCode());
-        } catch (IllegalArgumentException exception) {
-            deleteQuietly(audioFilePath);
-            return textResponse(HttpStatus.BAD_REQUEST, exception.getMessage());
-        } catch (Exception exception) {
-            deleteQuietly(audioFilePath);
-            log.error("声音克隆请求失败", exception);
-            return textResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Upload failed");
+            HttpServletRequest request) throws Exception {
+        if (audioFile.isEmpty()) {
+            throw new IllegalArgumentException("音频文件为空！");
         }
+        if (text == null || text.isBlank()) {
+            throw new IllegalArgumentException("合成文本不能为空！");
+        }
+        TaskSubmission submission = mediaTasks.submitSoundClone(
+                audioFile, promptText, promptLang, text, textLang, username(request));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(submission);
     }
 
     private static String username(HttpServletRequest request) {
         Object value = request.getAttribute("username");
         return value == null ? "anonymous" : value.toString();
-    }
-
-    private static ResponseEntity<StreamingResponseBody> textResponse(HttpStatus status, String message) {
-        StreamingResponseBody body = outputStream ->
-                outputStream.write(message.getBytes(StandardCharsets.UTF_8));
-        return ResponseEntity.status(status).contentType(MediaType.TEXT_PLAIN).body(body);
-    }
-
-    private void deleteQuietly(Path path) {
-        if (path == null) {
-            return;
-        }
-        try {
-            uploadSecurity.delete(Paths.get(uploadDir), path);
-        } catch (Exception exception) {
-            log.warn("无法删除声音克隆临时文件：{}", path.getFileName(), exception);
-        }
     }
 
     private boolean localServiceAvailable() {

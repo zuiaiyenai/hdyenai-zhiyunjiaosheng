@@ -75,9 +75,7 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     public Map<String, Object> saveVoiceNote(MultipartFile audioFile, String title, String owner) throws Exception {
         uploadSecurity.validate(audioFile, Type.AUDIO);
         uploadSecurity.ensureQuota(objectStorage.usedBytes(owner), audioFile.getSize());
-        Map<String, Object> result = new HashMap<>();
-        String noteId = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-                + "-" + UUID.randomUUID().toString().substring(0, 8);
+        String noteId = newNoteId();
         String audioKey = ObjectStorageKeys.voiceNoteAudio(
                 owner, noteId, audioFile.getOriginalFilename());
         String checksum = uploadSecurity.sha256(audioFile);
@@ -85,6 +83,27 @@ public class AccessibilityServiceImpl implements AccessibilityService {
             objectStorage.store(owner, audioKey, input, audioFile.getSize(),
                     audioFile.getContentType(), checksum);
         }
+        return finishVoiceNote(audioKey, noteId, title, owner);
+    }
+
+    @Override
+    public Map<String, Object> saveVoiceNoteFromObject(
+            String audioObjectKey, String originalFilename, String title, String owner)
+            throws Exception {
+        Metadata staged = objectStorage.requireMetadata(owner, audioObjectKey);
+        String noteId = newNoteId();
+        String audioKey = ObjectStorageKeys.voiceNoteAudio(owner, noteId, originalFilename);
+        objectStorage.withTemporaryCopy(owner, audioObjectKey, path -> {
+            objectStorage.storeFile(owner, audioKey, path, staged.contentType());
+            objectStorage.delete(owner, audioObjectKey);
+            return null;
+        });
+        return finishVoiceNote(audioKey, noteId, title, owner);
+    }
+
+    private Map<String, Object> finishVoiceNote(
+            String audioKey, String noteId, String title, String owner) throws Exception {
+        Map<String, Object> result = new HashMap<>();
 
         // 调用ASR进行真实的语音转文字
         String transcribedText = "";
@@ -153,6 +172,11 @@ public class AccessibilityServiceImpl implements AccessibilityService {
         result.put("total", notesList.size());
         result.put("message", "共找到 " + notesList.size() + " 条语音笔记");
         return result;
+    }
+
+    private String newNoteId() {
+        return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
     private static ManagedObjectStorageService testStorage() {

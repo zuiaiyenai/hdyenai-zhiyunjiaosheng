@@ -111,6 +111,33 @@ public class CoursewareProjectService {
     }
 
     public ProjectView create(MultipartFile file, String owner) throws IOException {
+        ProjectState state = prepareState(file, owner);
+        return completeCreate(state, () -> pptService.processPptAndGenerateContent(file));
+    }
+
+    public ProjectView prepare(MultipartFile file, String owner) throws IOException {
+        return view(prepareState(file, owner));
+    }
+
+    public ProjectView processPrepared(String id, String owner) throws IOException {
+        ProjectState state = requireProject(id, owner);
+        synchronized (state) {
+            materialize(state, state.sourceKey, state.source);
+            return completeCreate(state,
+                    () -> pptService.processPptAndGenerateContent(state.source, state.fileName));
+        }
+    }
+
+    public void failPreparedSubmission(String id, String owner, String message) {
+        ProjectState state = requireProject(id, owner);
+        synchronized (state) {
+            if ("PENDING".equals(state.status)) {
+                fail(state, new IllegalStateException(message));
+            }
+        }
+    }
+
+    private ProjectState prepareState(MultipartFile file, String owner) throws IOException {
         uploadSecurity.validate(file, Type.PRESENTATION);
         String fileName = validatePpt(file);
         String extension = fileName.toLowerCase(Locale.ROOT).endsWith(".pptx") ? ".pptx" : ".ppt";
@@ -135,9 +162,14 @@ public class CoursewareProjectService {
                 fileName, directory, source, objectPrefix, sourceKey, "");
         projects.put(id, state);
         persist(state);
+        return state;
+    }
+
+    private ProjectView completeCreate(ProjectState state, ScriptGenerator generator)
+            throws IOException {
         begin(state);
         try {
-            String script = pptService.processPptAndGenerateContent(file);
+            String script = generator.generate();
             if (script.startsWith("课件生成失败") || script.contains("AI 服务暂时繁忙")) {
                 throw new IllegalStateException(script);
             }
@@ -771,6 +803,11 @@ public class CoursewareProjectService {
     @FunctionalInterface
     private interface SlidePainter {
         void paint(Graphics2D graphics);
+    }
+
+    @FunctionalInterface
+    private interface ScriptGenerator {
+        String generate() throws IOException;
     }
 
     private static final class ProjectState {

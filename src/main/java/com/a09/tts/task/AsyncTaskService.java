@@ -27,6 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -78,10 +79,18 @@ public class AsyncTaskService {
 
     public TaskSubmission submit(String owner, String type, String deduplicationKey,
                                  TaskAction action) {
+        return submit(owner, type, deduplicationKey, action, () -> { });
+    }
+
+    public TaskSubmission submit(String owner, String type, String deduplicationKey,
+                                 TaskAction action, Runnable completion) {
         String normalizedOwner = normalizeOwner(owner);
         String normalizedType = requireValue(type, "任务类型不能为空");
         if (action == null) {
             throw new IllegalArgumentException("任务操作不能为空");
+        }
+        if (completion == null) {
+            throw new IllegalArgumentException("任务清理操作不能为空");
         }
         String dedupKey = normalizeDeduplicationKey(deduplicationKey);
         String id = UUID.randomUUID().toString();
@@ -96,10 +105,39 @@ public class AsyncTaskService {
             throw new TaskCapacityException("当前用户运行中的任务过多，请稍后重试");
         }
 
+        AtomicBoolean started = new AtomicBoolean();
+        AtomicBoolean cleaned = new AtomicBoolean();
+        Runnable cleanupOnce = () -> {
+            if (!cleaned.compareAndSet(false, true)) {
+                return;
+            }
+            try {
+                completion.run();
+            } catch (RuntimeException exception) {
+                log.warn("异步任务完成后的资源清理失败: taskId={}", id, exception);
+            }
+        };
         FutureTask<Void> future = new FutureTask<>(() -> {
             execute(id, action);
             return null;
-        });
+        }) {
+            @Override
+            public void run() {
+                started.set(true);
+                try {
+                    super.run();
+                } finally {
+                    cleanupOnce.run();
+                }
+            }
+
+            @Override
+            protected void done() {
+                if (!started.get()) {
+                    cleanupOnce.run();
+                }
+            }
+        };
         futures.put(id, future);
         try {
             ScheduledFuture<?> timeoutFuture = scheduler.schedule(
@@ -109,6 +147,7 @@ public class AsyncTaskService {
             return new TaskSubmission(id, false);
         } catch (RejectedExecutionException exception) {
             failBeforeStart(id, "任务队列已满");
+            future.cancel(false);
             clearLocalTracking(id);
             throw new TaskCapacityException("任务队列已满，请稍后重试");
         }

@@ -1,37 +1,21 @@
 package com.a09.tts.controller;
 
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import com.a09.tts.api.VideoSubtitlePreview;
-import com.a09.tts.service.VideoVoiceSwapService;
-import com.a09.tts.security.UploadSecurityService;
-import com.a09.tts.security.UploadSecurityService.Type;
+import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import com.a09.tts.task.MediaTaskService;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
 @RestController
 @RequestMapping("/video_voice_swap")
 public class VideoVoiceSwapController {
+    private final MediaTaskService mediaTasks;
 
-    private static final Logger log = LoggerFactory.getLogger(VideoVoiceSwapController.class);
-
-    private final VideoVoiceSwapService videoVoiceSwapService;
-    private final UploadSecurityService uploadSecurity;
-
-    @Value("${app.video-dir:./uploads/video}")
-    private String videoDir;
-
-    public VideoVoiceSwapController(VideoVoiceSwapService videoVoiceSwapService,
-                                    UploadSecurityService uploadSecurity) {
-        this.videoVoiceSwapService = videoVoiceSwapService;
-        this.uploadSecurity = uploadSecurity;
+    public VideoVoiceSwapController(MediaTaskService mediaTasks) {
+        this.mediaTasks = mediaTasks;
     }
 
     @PostMapping("/process")
@@ -43,27 +27,18 @@ public class VideoVoiceSwapController {
             @RequestParam(value = "includeSubtitles", defaultValue = "true") boolean includeSubtitles,
             HttpServletRequest request) throws Exception {
 
-        Path videoFilePath = null;
-        try {
-            videoFilePath = uploadSecurity.save(videoFile, Paths.get(videoDir), Type.VIDEO, username(request));
-            return videoVoiceSwapService.processVideo(videoFilePath.toString(), voiceType,
-                    1.0, 1.0, 1.0, transcript, subtitles, includeSubtitles);
-        } finally {
-            deleteUpload(videoFilePath);
-        }
+        TaskSubmission submission = mediaTasks.submitVideoSwap(
+                videoFile, voiceType, transcript, subtitles, includeSubtitles,
+                username(request));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(submission);
     }
 
     @PostMapping("/subtitles")
     public ResponseEntity<?> generateSubtitles(@RequestParam("video") MultipartFile videoFile,
                                                HttpServletRequest request) throws Exception {
-        Path videoFilePath = null;
-        try {
-            videoFilePath = uploadSecurity.save(videoFile, Paths.get(videoDir), Type.VIDEO, username(request));
-            VideoSubtitlePreview preview = videoVoiceSwapService.generateSubtitlePreview(videoFilePath.toString());
-            return ResponseEntity.ok(preview);
-        } finally {
-            deleteUpload(videoFilePath);
-        }
+        TaskSubmission submission = mediaTasks.submitVideoSubtitles(
+                videoFile, username(request));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(submission);
     }
 
     private String username(HttpServletRequest request) {
@@ -71,14 +46,4 @@ public class VideoVoiceSwapController {
         return value == null ? "anonymous" : value.toString();
     }
 
-    private void deleteUpload(Path path) {
-        if (path == null) {
-            return;
-        }
-        try {
-            uploadSecurity.delete(Paths.get(videoDir), path);
-        } catch (Exception e) {
-            log.warn("临时上传文件清理失败: {}", path.getFileName(), e);
-        }
-    }
 }

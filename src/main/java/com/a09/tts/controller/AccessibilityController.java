@@ -2,6 +2,9 @@ package com.a09.tts.controller;
 
 
 import com.a09.tts.service.AccessibilityService;
+import com.a09.tts.task.AsyncTaskService.TaskSubmission;
+import com.a09.tts.task.MediaTaskService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -14,9 +17,12 @@ import jakarta.servlet.http.HttpServletRequest;
 public class AccessibilityController {
 
     private final AccessibilityService accessibilityService;
+    private final MediaTaskService mediaTasks;
 
-    public AccessibilityController(AccessibilityService accessibilityService) {
+    public AccessibilityController(
+            AccessibilityService accessibilityService, MediaTaskService mediaTasks) {
         this.accessibilityService = accessibilityService;
+        this.mediaTasks = mediaTasks;
     }
 
     /**
@@ -31,13 +37,14 @@ public class AccessibilityController {
      * 语音笔记 - 上传语音转为文字笔记
      */
     @PostMapping("/voice-note")
-    public ResponseEntity<Map<String, Object>> createVoiceNote(
+    public ResponseEntity<TaskSubmission> createVoiceNote(
             @RequestParam("audio") MultipartFile audioFile,
             @RequestParam(value = "title", defaultValue = "未命名笔记") String title,
             HttpServletRequest request) throws Exception {
         Object username = request.getAttribute("username");
-        return ResponseEntity.ok(accessibilityService.saveVoiceNote(
-                audioFile, title, username == null ? "anonymous" : username.toString()));
+        TaskSubmission submission = mediaTasks.submitVoiceNote(
+                audioFile, title, username == null ? "anonymous" : username.toString());
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(submission);
     }
 
     /**

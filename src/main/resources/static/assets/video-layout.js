@@ -45,6 +45,36 @@
     }
     return (await response.text().catch(()=>""))||("请求失败（"+response.status+"）");
   }
+  async function submitAndWait(config,path,form,onProgress){
+    const headers=config.token?{Authorization:"Bearer "+config.token}:{};
+    const response=await fetch(config.baseUrl+path,{method:"POST",headers,body:form});
+    if(!response.ok)throw new Error(await apiError(response));
+    const submission=await response.json();
+    if(!submission||!submission.taskId)throw new Error("任务提交失败：未返回 taskId");
+    const deadline=Date.now()+16*60*1000;
+    let delay=1000;
+    while(Date.now()<deadline){
+      const taskResponse=await fetch(
+        config.baseUrl+"/api/tasks/"+encodeURIComponent(submission.taskId),{headers});
+      if(!taskResponse.ok)throw new Error(await apiError(taskResponse));
+      const task=await taskResponse.json();
+      if(task.status==="SUCCESS")return task;
+      if(["FAILED","CANCELLED","TIMEOUT"].includes(task.status)){
+        throw new Error(task.errorMessage||("任务"+task.status));
+      }
+      if(onProgress)onProgress(task);
+      await new Promise(resolve=>window.setTimeout(resolve,delay));
+      delay=Math.min(5000,delay+1000);
+    }
+    throw new Error("任务状态查询超时，请稍后重试");
+  }
+  async function fetchTaskResult(config,taskId){
+    const headers=config.token?{Authorization:"Bearer "+config.token}:{};
+    const response=await fetch(
+      config.baseUrl+"/api/tasks/"+encodeURIComponent(taskId)+"/result",{headers});
+    if(!response.ok)throw new Error(await apiError(response));
+    return response;
+  }
   function requireLogin(){
     if(apiConfig().token)return true;
     window.alert("请先登录后再使用此功能");
@@ -374,10 +404,11 @@
       status.className="video-swap-status";
       status.textContent="正在识别语音并生成时间轴字幕……";
       try{
-        const headers=token?{Authorization:"Bearer "+token}:{};
-        const response=await fetch(baseUrl+"/video_voice_swap/subtitles",{method:"POST",headers,body:form});
-        if(!response.ok)throw new Error((await response.text())||("字幕生成失败（"+response.status+"）"));
-        const data=await response.json();
+        const task=await submitAndWait({baseUrl,token},"/video_voice_swap/subtitles",form,()=>{
+          status.textContent="字幕任务正在后台执行……";
+        });
+        const resultResponse=await fetchTaskResult({baseUrl,token},task.id);
+        const data=await resultResponse.json();
         transcript=(data.transcript||"").trim();
         subtitleEditor.value=data.subtitles||"";
         subtitleEditor.disabled=!includeSubtitles.checked;
@@ -422,10 +453,11 @@
       status.className="video-swap-status";
       status.textContent="正在合成换声与字幕，请稍候……";
       try{
-        const headers=token?{Authorization:"Bearer "+token}:{};
-        const response=await fetch(baseUrl+"/video_voice_swap/process",{method:"POST",headers,body:form});
-        if(!response.ok)throw new Error((await response.text())||("处理失败（"+response.status+"）"));
-        const blob=await response.blob();
+        const task=await submitAndWait({baseUrl,token},"/video_voice_swap/process",form,()=>{
+          status.textContent="换声任务正在后台执行……";
+        });
+        const resultResponse=await fetchTaskResult({baseUrl,token},task.id);
+        const blob=await resultResponse.blob();
         clearSubtitleTrack();
         if(objectUrl)URL.revokeObjectURL(objectUrl);
         objectUrl=URL.createObjectURL(blob);

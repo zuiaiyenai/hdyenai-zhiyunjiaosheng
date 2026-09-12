@@ -382,9 +382,10 @@
     async function submitTask(path,options){
       const submission=await request(path,options);
       if(!submission||!submission.taskId)throw new Error("任务提交失败：未返回 taskId。");
-      await pollTask(submission.taskId);
+      const task=await pollTask(submission.taskId);
       project=await request(`/courseware/projects/${project.id}`);
       render();
+      return task;
     }
 
     window.addEventListener("pagehide",stopPolling,{once:true});
@@ -468,7 +469,11 @@
       if(!file)throw new Error("请先选择 PPT 或 PPTX 文件。");
       const form=new FormData();
       form.append("file",file);
-      project=await request("/courseware/projects",{method:"POST",body:form});
+      const submission=await request("/courseware/projects",{method:"POST",body:form});
+      if(!submission||!submission.taskId)throw new Error("任务提交失败：未返回 taskId。");
+      const task=await pollTask(submission.taskId);
+      if(!task.resultData)throw new Error("课件生成任务未返回项目编号。");
+      project=await request(`/courseware/projects/${encodeURIComponent(task.resultData)}`);
       get("script").value=project.script||"";
       render();
       show("讲稿已生成，可直接修改或通过 AI 多轮优化。","success");
