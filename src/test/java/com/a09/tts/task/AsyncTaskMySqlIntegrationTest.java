@@ -7,49 +7,172 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @EnabledIfEnvironmentVariable(named = "MYSQL_INTEGRATION_URL", matches = "jdbc:mysql:.*")
 class AsyncTaskMySqlIntegrationTest {
 
     @Test
-    void migratesPersistsScopesAndRecoversTasks() {
+    void migratesLegacyTasksAndEnforcesAtomicStateAcrossRepositoryInstances() throws Exception {
         String url = requiredEnvironment("MYSQL_INTEGRATION_URL");
         String username = requiredEnvironment("MYSQL_INTEGRATION_USERNAME");
         String password = System.getenv().getOrDefault("MYSQL_INTEGRATION_PASSWORD", "");
         requireDedicatedVerificationSchema(url);
-        Flyway flyway = Flyway.configure()
+
+        Flyway versionFive = Flyway.configure()
                 .dataSource(url, username, password)
+                .target("5")
                 .cleanDisabled(false)
                 .load();
-        flyway.clean();
+        versionFive.clean();
         try {
-            flyway.migrate();
-            JdbcTemplate jdbc = new JdbcTemplate(
-                    new DriverManagerDataSource(url, username, password));
-            JdbcTaskRepository first = new JdbcTaskRepository(jdbc);
+            versionFive.migrate();
+            JdbcTemplate jdbc = jdbc(url, username, password);
             Instant now = Instant.now();
-            first.save(new TaskRecord(
-                    "00000000-0000-0000-0000-000000000005", "alice", "COURSEWARE_VIDEO",
-                    TaskStatus.RUNNING, 10, null, null, "project:1",
-                    now, now, null));
+            insertLegacyTask(jdbc, task("legacy-pending", "legacy", "MEDIA", "same", now));
+            insertLegacyTask(jdbc, new TaskRecord(
+                    "legacy-running", "legacy", "MEDIA", TaskStatus.RUNNING,
+                    10, null, null, "same", now, now, null));
 
-            JdbcTaskRepository restarted = new JdbcTaskRepository(jdbc);
-            TaskRecord restored = restarted.findByIdAndOwner(
-                    "00000000-0000-0000-0000-000000000005", "alice").orElseThrow();
-            assertEquals(TaskStatus.RUNNING, restored.status());
-            assertFalse(restarted.findByIdAndOwner(restored.id(), "bob").isPresent());
-            assertEquals(1, restarted.markInterruptedTasksFailed(
-                    Instant.now(), "应用重启导致任务中断"));
-            assertEquals(TaskStatus.FAILED,
-                    restarted.findById(restored.id()).orElseThrow().status());
-            assertEquals(5, jdbc.queryForObject(
+            Flyway.configure().dataSource(url, username, password).load().migrate();
+
+            assertEquals(2, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM async_task WHERE task_id LIKE 'legacy-%' AND status = 'FAILED'",
+                    Integer.class));
+            assertEquals(6, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
+
+            JdbcTaskRepository first = repository(url, username, password);
+            JdbcTaskRepository second = repository(url, username, password);
+            verifyConcurrentDeduplication(first, second);
+            verifyPerUserCapacity(first, second);
+            verifyAtomicTransitions(first, second);
+
+            assertEquals(0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM async_task_user_slot", Integer.class));
         } finally {
-            flyway.clean();
+            Flyway.configure()
+                    .dataSource(url, username, password)
+                    .cleanDisabled(false)
+                    .load()
+                    .clean();
         }
+    }
+
+    private void verifyConcurrentDeduplication(
+            JdbcTaskRepository first, JdbcTaskRepository second) throws Exception {
+        Instant now = Instant.now();
+        List<TaskRepository.CreateResult> results = race(
+                () -> first.create(task(UUID.randomUUID().toString(),
+                        "dedup-user", "VIDEO", "project:1", now), 2),
+                () -> second.create(task(UUID.randomUUID().toString(),
+                        "dedup-user", "VIDEO", "project:1", now), 2));
+
+        assertEquals(1, results.stream()
+                .filter(result -> result.disposition() == TaskRepository.CreateDisposition.CREATED)
+                .count());
+        assertEquals(1, results.stream()
+                .filter(result -> result.disposition() == TaskRepository.CreateDisposition.DUPLICATE)
+                .count());
+        assertEquals(1, results.stream().map(result -> result.task().id()).distinct().count());
+        assertTrue(first.markFailed(results.get(0).task().id(), "test cleanup", Instant.now()));
+    }
+
+    private void verifyPerUserCapacity(
+            JdbcTaskRepository first, JdbcTaskRepository second) throws Exception {
+        Instant now = Instant.now();
+        List<TaskRepository.CreateResult> results = race(
+                () -> first.create(task(UUID.randomUUID().toString(),
+                        "capacity-user", "VIDEO", null, now), 1),
+                () -> second.create(task(UUID.randomUUID().toString(),
+                        "capacity-user", "ASR", null, now), 1));
+
+        assertEquals(1, results.stream()
+                .filter(result -> result.disposition() == TaskRepository.CreateDisposition.CREATED)
+                .count());
+        assertEquals(1, results.stream()
+                .filter(result -> result.disposition()
+                        == TaskRepository.CreateDisposition.CAPACITY_EXCEEDED)
+                .count());
+        TaskRecord created = results.stream()
+                .filter(result -> result.disposition() == TaskRepository.CreateDisposition.CREATED)
+                .findFirst().orElseThrow().task();
+        assertTrue(second.markFailed(created.id(), "test cleanup", Instant.now()));
+    }
+
+    private void verifyAtomicTransitions(
+            JdbcTaskRepository first, JdbcTaskRepository second) throws Exception {
+        String id = UUID.randomUUID().toString();
+        assertEquals(TaskRepository.CreateDisposition.CREATED,
+                first.create(task(id, "transition-user", "VIDEO", null, Instant.now()), 1)
+                        .disposition());
+
+        List<Boolean> claimed = race(
+                () -> first.markRunning(id, Instant.now()),
+                () -> second.markRunning(id, Instant.now()));
+        assertEquals(1, claimed.stream().filter(Boolean::booleanValue).count());
+
+        List<Boolean> terminal = race(
+                () -> first.markSucceeded(id, "done", Instant.now()),
+                () -> second.markFailed(id, "failed", Instant.now()));
+        assertEquals(1, terminal.stream().filter(Boolean::booleanValue).count());
+        assertTrue(first.findById(id).orElseThrow().status().terminal());
+    }
+
+    private <T> List<T> race(Callable<T> first, Callable<T> second) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<T> firstFuture = executor.submit(() -> {
+                start.await();
+                return first.call();
+            });
+            Future<T> secondFuture = executor.submit(() -> {
+                start.await();
+                return second.call();
+            });
+            start.countDown();
+            return List.of(firstFuture.get(10, TimeUnit.SECONDS),
+                    secondFuture.get(10, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private TaskRecord task(String id, String owner, String type,
+                            String deduplicationKey, Instant createdAt) {
+        return new TaskRecord(id, owner, type, TaskStatus.PENDING,
+                0, null, null, deduplicationKey, createdAt, null, null);
+    }
+
+    private void insertLegacyTask(JdbcTemplate jdbc, TaskRecord task) {
+        jdbc.update("""
+                INSERT INTO async_task (
+                    task_id, owner_username, task_type, status, progress, result_data,
+                    error_message, deduplication_key, created_at, started_at, finished_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, task.id(), task.owner(), task.type(), task.status().name(), task.progress(),
+                task.resultData(), task.errorMessage(), task.deduplicationKey(),
+                java.sql.Timestamp.from(task.createdAt()),
+                task.startedAt() == null ? null : java.sql.Timestamp.from(task.startedAt()), null);
+    }
+
+    private JdbcTaskRepository repository(String url, String username, String password) {
+        return new JdbcTaskRepository(jdbc(url, username, password));
+    }
+
+    private JdbcTemplate jdbc(String url, String username, String password) {
+        return new JdbcTemplate(new DriverManagerDataSource(url, username, password));
     }
 
     private String requiredEnvironment(String name) {
@@ -63,9 +186,9 @@ class AsyncTaskMySqlIntegrationTest {
     private void requireDedicatedVerificationSchema(String url) {
         String withoutQuery = url.replaceFirst("\\?.*$", "");
         String schema = withoutQuery.substring(withoutQuery.lastIndexOf('/') + 1);
-        if (!schema.matches("tts_phase5_verify_[a-zA-Z0-9_]+")) {
+        if (!schema.matches("tts_phase2_atomic_verify_[a-zA-Z0-9_]+")) {
             throw new IllegalArgumentException(
-                    "MYSQL_INTEGRATION_URL must target a dedicated tts_phase5_verify_* schema");
+                    "MYSQL_INTEGRATION_URL must target a dedicated tts_phase2_atomic_verify_* schema");
         }
     }
 }

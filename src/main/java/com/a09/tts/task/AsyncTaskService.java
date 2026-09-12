@@ -3,7 +3,6 @@ package com.a09.tts.task;
 import com.a09.tts.api.PageResult;
 import com.a09.tts.api.Pagination;
 import com.a09.tts.api.ResourceNotFoundException;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -16,7 +15,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,18 +32,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 public class AsyncTaskService {
     private static final Logger log = LoggerFactory.getLogger(AsyncTaskService.class);
-    private static final String RESTART_REASON = "应用重启导致任务中断";
     private final TaskRepository repository;
     private final ThreadPoolExecutor executor;
     private final ScheduledExecutorService scheduler;
     private final Duration timeout;
     private final int perUserConcurrency;
-    private final Map<String, Future<?>> futures = new ConcurrentHashMap<>();
-    private final Map<String, ScheduledFuture<?>> timeouts = new ConcurrentHashMap<>();
-    private final Map<String, String> reservations = new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> activeByOwner = new ConcurrentHashMap<>();
-    private final Map<String, String> activeDeduplication = new ConcurrentHashMap<>();
-    private final Object[] taskLocks = new Object[64];
+    private final ConcurrentHashMap<String, Future<?>> futures = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ScheduledFuture<?>> timeouts = new ConcurrentHashMap<>();
 
     @Autowired
     public AsyncTaskService(
@@ -64,9 +57,6 @@ public class AsyncTaskService {
         this.repository = repository;
         this.timeout = timeout;
         this.perUserConcurrency = perUserConcurrency;
-        for (int index = 0; index < taskLocks.length; index++) {
-            taskLocks[index] = new Object();
-        }
         AtomicInteger workerNumber = new AtomicInteger();
         ThreadFactory workerFactory = runnable -> {
             Thread thread = new Thread(runnable, "media-task-" + workerNumber.incrementAndGet());
@@ -86,11 +76,6 @@ public class AsyncTaskService {
         });
     }
 
-    @PostConstruct
-    public void recoverInterruptedTasks() {
-        repository.markInterruptedTasksFailed(Instant.now(), RESTART_REASON);
-    }
-
     public TaskSubmission submit(String owner, String type, String deduplicationKey,
                                  TaskAction action) {
         String normalizedOwner = normalizeOwner(owner);
@@ -99,55 +84,32 @@ public class AsyncTaskService {
             throw new IllegalArgumentException("任务操作不能为空");
         }
         String dedupKey = normalizeDeduplicationKey(deduplicationKey);
-        String dedupToken = dedupKey == null
-                ? null : normalizedOwner + "\u0000" + normalizedType + "\u0000" + dedupKey;
-        if (dedupToken != null) {
-            String existingId = activeDeduplication.get(dedupToken);
-            if (existingId != null) {
-                TaskRecord existing = repository.findByIdAndOwner(existingId, normalizedOwner)
-                        .orElse(null);
-                if (existing != null && !existing.status().terminal()) {
-                    return new TaskSubmission(existing.id(), true);
-                }
-                activeDeduplication.remove(dedupToken, existingId);
-            }
-        }
-
-        reserveUser(normalizedOwner);
         String id = UUID.randomUUID().toString();
-        reservations.put(id, normalizedOwner);
-        if (dedupToken != null) {
-            String existing = activeDeduplication.putIfAbsent(dedupToken, id);
-            if (existing != null) {
-                release(id, dedupToken);
-                TaskRecord task = repository.findByIdAndOwner(existing, normalizedOwner)
-                        .orElse(null);
-                if (task != null && !task.status().terminal()) {
-                    return new TaskSubmission(existing, true);
-                }
-                return submit(owner, type, deduplicationKey, action);
-            }
+        Instant createdAt = Instant.now();
+        TaskRecord task = new TaskRecord(id, normalizedOwner, normalizedType, TaskStatus.PENDING,
+                0, null, null, dedupKey, createdAt, null, null);
+        TaskRepository.CreateResult createResult = repository.create(task, perUserConcurrency);
+        if (createResult.disposition() == TaskRepository.CreateDisposition.DUPLICATE) {
+            return new TaskSubmission(createResult.task().id(), true);
+        }
+        if (createResult.disposition() == TaskRepository.CreateDisposition.CAPACITY_EXCEEDED) {
+            throw new TaskCapacityException("当前用户运行中的任务过多，请稍后重试");
         }
 
-        Instant createdAt = Instant.now();
-        repository.save(new TaskRecord(id, normalizedOwner, normalizedType, TaskStatus.PENDING,
-                0, null, null, dedupKey, createdAt, null, null));
-        String finalDedupToken = dedupToken;
         FutureTask<Void> future = new FutureTask<>(() -> {
-            execute(id, action, finalDedupToken);
+            execute(id, action);
             return null;
         });
         futures.put(id, future);
         try {
             ScheduledFuture<?> timeoutFuture = scheduler.schedule(
-                    () -> timeout(id, finalDedupToken), timeout.toMillis(), TimeUnit.MILLISECONDS);
+                    () -> timeout(id), timeout.toMillis(), TimeUnit.MILLISECONDS);
             timeouts.put(id, timeoutFuture);
             executor.execute(future);
             return new TaskSubmission(id, false);
         } catch (RejectedExecutionException exception) {
-            futures.remove(id);
             failBeforeStart(id, "任务队列已满");
-            release(id, finalDedupToken);
+            clearLocalTracking(id);
             throw new TaskCapacityException("任务队列已满，请稍后重试");
         }
     }
@@ -166,124 +128,58 @@ public class AsyncTaskService {
 
     public TaskRecord cancel(String id, String owner) {
         String normalizedOwner = normalizeOwner(owner);
-        synchronized (lock(id)) {
-            TaskRecord current = repository.findByIdAndOwner(id, normalizedOwner)
-                    .orElseThrow(() -> new ResourceNotFoundException("任务不存在或无权访问"));
-            if (current.status().terminal()) {
-                return current;
-            }
-            TaskRecord cancelled = update(current, TaskStatus.CANCELLED, current.progress(),
-                    current.resultData(), "用户取消任务", current.startedAt(), Instant.now());
-            repository.save(cancelled);
+        TaskRecord current = repository.findByIdAndOwner(id, normalizedOwner)
+                .orElseThrow(() -> new ResourceNotFoundException("任务不存在或无权访问"));
+        if (current.status().terminal()) {
+            return current;
+        }
+        if (repository.markCancelled(id, normalizedOwner, "用户取消任务", Instant.now())) {
             Future<?> future = futures.get(id);
             if (future != null) {
                 future.cancel(true);
             }
-            release(id, dedupToken(current));
-            return cancelled;
+            clearLocalTracking(id);
         }
+        return repository.findByIdAndOwner(id, normalizedOwner)
+                .orElseThrow(() -> new ResourceNotFoundException("任务不存在或无权访问"));
     }
 
-    private void execute(String id, TaskAction action, String dedupToken) {
+    private void execute(String id, TaskAction action) {
         try {
-            synchronized (lock(id)) {
-                TaskRecord pending = repository.findById(id).orElseThrow();
-                if (pending.status().terminal()) {
-                    return;
-                }
-                repository.save(update(pending, TaskStatus.RUNNING, 10,
-                        null, null, Instant.now(), null));
+            if (!repository.markRunning(id, Instant.now())) {
+                return;
             }
             String result = action.execute();
-            synchronized (lock(id)) {
-                TaskRecord running = repository.findById(id).orElseThrow();
-                if (!running.status().terminal()) {
-                    repository.save(update(running, TaskStatus.SUCCESS, 100,
-                            result, null, running.startedAt(), Instant.now()));
-                }
-            }
+            repository.markSucceeded(id, result, Instant.now());
         } catch (Exception exception) {
-            boolean failed = false;
-            synchronized (lock(id)) {
-                TaskRecord current = repository.findById(id).orElse(null);
-                if (current != null && !current.status().terminal()) {
-                    repository.save(update(current, TaskStatus.FAILED, current.progress(),
-                            null, safeMessage(exception), current.startedAt(), Instant.now()));
-                    failed = true;
-                }
-            }
-            if (failed) {
+            if (repository.markFailed(id, safeMessage(exception), Instant.now())) {
                 log.error("异步任务执行失败: taskId={}", id, exception);
             }
         } finally {
-            release(id, dedupToken);
+            clearLocalTracking(id);
         }
     }
 
-    private void timeout(String id, String dedupToken) {
-        synchronized (lock(id)) {
-            TaskRecord current = repository.findById(id).orElse(null);
-            if (current == null || current.status().terminal()) {
-                return;
-            }
-            repository.save(update(current, TaskStatus.TIMEOUT, current.progress(),
-                    null, "任务执行超时", current.startedAt(), Instant.now()));
+    private void timeout(String id) {
+        if (repository.markTimedOut(id, "任务执行超时", Instant.now())) {
             Future<?> future = futures.get(id);
             if (future != null) {
                 future.cancel(true);
             }
-            release(id, dedupToken);
+            clearLocalTracking(id);
         }
     }
 
     private void failBeforeStart(String id, String message) {
-        TaskRecord current = repository.findById(id).orElseThrow();
-        repository.save(update(current, TaskStatus.FAILED, 0,
-                null, message, null, Instant.now()));
+        repository.markFailed(id, message, Instant.now());
     }
 
-    private TaskRecord update(TaskRecord task, TaskStatus status, int progress,
-                              String resultData, String errorMessage,
-                              Instant startedAt, Instant finishedAt) {
-        return new TaskRecord(task.id(), task.owner(), task.type(), status, progress,
-                resultData, errorMessage, task.deduplicationKey(), task.createdAt(),
-                startedAt, finishedAt);
-    }
-
-    private void reserveUser(String owner) {
-        AtomicInteger counter = activeByOwner.computeIfAbsent(owner, ignored -> new AtomicInteger());
-        int active = counter.incrementAndGet();
-        if (active > perUserConcurrency) {
-            counter.decrementAndGet();
-            throw new TaskCapacityException("当前用户运行中的任务过多，请稍后重试");
-        }
-    }
-
-    private void release(String id, String dedupToken) {
-        String owner = reservations.remove(id);
-        if (owner != null) {
-            AtomicInteger counter = activeByOwner.get(owner);
-            if (counter != null && counter.decrementAndGet() <= 0) {
-                activeByOwner.remove(owner, counter);
-            }
-        }
+    private void clearLocalTracking(String id) {
         futures.remove(id);
         ScheduledFuture<?> timeoutFuture = timeouts.remove(id);
         if (timeoutFuture != null) {
             timeoutFuture.cancel(false);
         }
-        if (dedupToken != null) {
-            activeDeduplication.remove(dedupToken, id);
-        }
-    }
-
-    private String dedupToken(TaskRecord task) {
-        return task.deduplicationKey() == null ? null
-                : task.owner() + "\u0000" + task.type() + "\u0000" + task.deduplicationKey();
-    }
-
-    private Object lock(String id) {
-        return taskLocks[Math.floorMod(id.hashCode(), taskLocks.length)];
     }
 
     private String normalizeOwner(String owner) {

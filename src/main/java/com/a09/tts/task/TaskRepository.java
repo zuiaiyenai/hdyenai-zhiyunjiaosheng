@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface TaskRepository {
-    void save(TaskRecord task);
+    CreateResult create(TaskRecord task, int perUserConcurrency);
 
     Optional<TaskRecord> findById(String id);
 
@@ -13,5 +13,33 @@ public interface TaskRepository {
 
     List<TaskRecord> findByOwner(String owner, int offset, int limit);
 
-    int markInterruptedTasksFailed(Instant finishedAt, String reason);
+    boolean markRunning(String id, Instant startedAt);
+
+    boolean markSucceeded(String id, String resultData, Instant finishedAt);
+
+    boolean markFailed(String id, String errorMessage, Instant finishedAt);
+
+    boolean markTimedOut(String id, String errorMessage, Instant finishedAt);
+
+    boolean markCancelled(String id, String owner, String errorMessage, Instant finishedAt);
+
+    enum CreateDisposition {
+        CREATED,
+        DUPLICATE,
+        CAPACITY_EXCEEDED
+    }
+
+    record CreateResult(CreateDisposition disposition, TaskRecord task) {
+        public static CreateResult created(TaskRecord task) {
+            return new CreateResult(CreateDisposition.CREATED, task);
+        }
+
+        public static CreateResult duplicate(TaskRecord task) {
+            return new CreateResult(CreateDisposition.DUPLICATE, task);
+        }
+
+        public static CreateResult capacityExceeded() {
+            return new CreateResult(CreateDisposition.CAPACITY_EXCEEDED, null);
+        }
+    }
 }

@@ -151,19 +151,20 @@ class AsyncTaskServiceTest {
     }
 
     @Test
-    void marksInterruptedTasksFailedOnStartup() {
+    void leavesPersistedActiveTasksForDurableRecovery() {
         InMemoryTaskRepository repository = new InMemoryTaskRepository();
         Instant now = Instant.now();
-        repository.save(new TaskRecord("old", "alice", "VIDEO", TaskStatus.RUNNING,
-                10, null, null, null, now, now, null));
+        assertEquals(TaskRepository.CreateDisposition.CREATED,
+                repository.create(new TaskRecord("old", "alice", "VIDEO", TaskStatus.PENDING,
+                        0, null, null, null, now, null, null), 1).disposition());
+        assertTrue(repository.markRunning("old", now));
         AsyncTaskService service = service(
                 repository, 1, 1, 1, Duration.ofSeconds(1), 1);
         try {
-            service.recoverInterruptedTasks();
             TaskRecord recovered = repository.findById("old").orElseThrow();
-            assertEquals(TaskStatus.FAILED, recovered.status());
-            assertTrue(recovered.errorMessage().contains("重启"));
+            assertEquals(TaskStatus.RUNNING, recovered.status());
         } finally {
+            repository.markFailed("old", "test cleanup", Instant.now());
             service.shutdown();
         }
     }
@@ -172,9 +173,9 @@ class AsyncTaskServiceTest {
     void paginatesTasksWithinOwnerBoundary() {
         InMemoryTaskRepository repository = new InMemoryTaskRepository();
         Instant now = Instant.now();
-        repository.save(task("alice-1", "alice", now.minusSeconds(2)));
-        repository.save(task("bob-1", "bob", now.minusSeconds(1)));
-        repository.save(task("alice-2", "alice", now));
+        completeTask(repository, "alice-1", "alice", now.minusSeconds(2));
+        completeTask(repository, "bob-1", "bob", now.minusSeconds(1));
+        completeTask(repository, "alice-2", "alice", now);
         AsyncTaskService service = service(
                 repository, 1, 1, 1, Duration.ofSeconds(1), 1);
         try {
@@ -191,9 +192,14 @@ class AsyncTaskServiceTest {
         }
     }
 
-    private TaskRecord task(String id, String owner, Instant createdAt) {
-        return new TaskRecord(id, owner, "TEST", TaskStatus.SUCCESS,
-                100, "done", null, null, createdAt, createdAt, createdAt);
+    private void completeTask(InMemoryTaskRepository repository, String id,
+                              String owner, Instant createdAt) {
+        TaskRecord task = new TaskRecord(id, owner, "TEST", TaskStatus.PENDING,
+                0, null, null, null, createdAt, null, null);
+        assertEquals(TaskRepository.CreateDisposition.CREATED,
+                repository.create(task, 1).disposition());
+        assertTrue(repository.markRunning(id, createdAt));
+        assertTrue(repository.markSucceeded(id, "done", createdAt));
     }
 
     private AsyncTaskService service(InMemoryTaskRepository repository,

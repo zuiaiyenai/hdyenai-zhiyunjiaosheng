@@ -36,7 +36,7 @@ class PendingFileCleanupMySqlIntegrationTest {
             assertEquals(1, repository.findBatch(100).get(0).attempts());
             repository.delete(entry.id());
             assertEquals(0, repository.findBatch(100).size());
-            assertEquals(5, jdbc.queryForObject(
+            assertEquals(6, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
         } finally {
             flyway.clean();
