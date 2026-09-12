@@ -5,6 +5,11 @@ import com.a09.tts.service.AccessibilityService;
 import com.a09.tts.service.MoonshotChatClient;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.security.UploadSecurityService.Type;
+import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
+import com.a09.tts.storage.LocalObjectStorageService;
+import com.a09.tts.storage.ManagedObjectStorageService;
+import com.a09.tts.storage.ObjectStorageKeys;
+import com.a09.tts.storage.StoredObjectMetadataRepository.Metadata;
 import org.apache.poi.hslf.usermodel.HSLFShape;
 import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
@@ -16,14 +21,10 @@ import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -33,24 +34,24 @@ public class AccessibilityServiceImpl implements AccessibilityService {
 
     private static final Logger log = LoggerFactory.getLogger(AccessibilityServiceImpl.class);
 
-    @Value("${app.accessibility-dir:./uploads/accessibility}")
-    private String accessibilityDir;
-
     @Autowired(required = false)
     private ASRService asrService;
 
     private final MoonshotChatClient moonshotChatClient;
     private final UploadSecurityService uploadSecurity;
+    private final ManagedObjectStorageService objectStorage;
 
     @Autowired
     public AccessibilityServiceImpl(MoonshotChatClient moonshotChatClient,
-                                    UploadSecurityService uploadSecurity) {
+                                    UploadSecurityService uploadSecurity,
+                                    ManagedObjectStorageService objectStorage) {
         this.moonshotChatClient = moonshotChatClient;
         this.uploadSecurity = uploadSecurity;
+        this.objectStorage = objectStorage;
     }
 
     public AccessibilityServiceImpl(MoonshotChatClient moonshotChatClient) {
-        this(moonshotChatClient, new UploadSecurityService());
+        this(moonshotChatClient, new UploadSecurityService(), testStorage());
     }
 
     /**
@@ -72,17 +73,25 @@ public class AccessibilityServiceImpl implements AccessibilityService {
      * 语音笔记：使用ASR真实转写语音为文字并保存笔记
      */
     public Map<String, Object> saveVoiceNote(MultipartFile audioFile, String title, String owner) throws Exception {
+        uploadSecurity.validate(audioFile, Type.AUDIO);
+        uploadSecurity.ensureQuota(objectStorage.usedBytes(owner), audioFile.getSize());
         Map<String, Object> result = new HashMap<>();
-        Path notesDir = Paths.get(accessibilityDir, "notes");
-        Path audioPath = uploadSecurity.save(audioFile, notesDir, Type.AUDIO, owner);
-
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String noteId = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                + "-" + UUID.randomUUID().toString().substring(0, 8);
+        String audioKey = ObjectStorageKeys.voiceNoteAudio(
+                owner, noteId, audioFile.getOriginalFilename());
+        String checksum = uploadSecurity.sha256(audioFile);
+        try (var input = audioFile.getInputStream()) {
+            objectStorage.store(owner, audioKey, input, audioFile.getSize(),
+                    audioFile.getContentType(), checksum);
+        }
 
         // 调用ASR进行真实的语音转文字
         String transcribedText = "";
         if (asrService != null) {
             try {
-                transcribedText = asrService.transcribe(audioPath.toString(), "zh");
+                transcribedText = objectStorage.withTemporaryCopy(
+                        owner, audioKey, path -> asrService.transcribe(path.toString(), "zh"));
                 log.info("语音笔记ASR转写结果: {}", transcribedText);
             } catch (Exception e) {
                 log.warn("ASR转写失败，使用默认文本: {}", e.getMessage());
@@ -96,20 +105,27 @@ public class AccessibilityServiceImpl implements AccessibilityService {
         }
 
         // 保存笔记文本
-        String noteFileName = timestamp + "_note.txt";
-        Path notePath = audioPath.getParent().resolve(noteFileName).normalize();
-        if (!notePath.startsWith(audioPath.getParent())) {
-            throw new IllegalArgumentException("非法笔记路径");
+        String noteKey = ObjectStorageKeys.voiceNote(owner, noteId, "note.txt");
+        byte[] noteContent = transcribedText.getBytes(StandardCharsets.UTF_8);
+        uploadSecurity.ensureQuota(objectStorage.usedBytes(owner), noteContent.length);
+        try {
+            objectStorage.storeBytes(owner, noteKey, noteContent, "text/plain; charset=UTF-8");
+        } catch (Exception exception) {
+            try {
+                objectStorage.delete(owner, audioKey);
+            } catch (Exception cleanupException) {
+                exception.addSuppressed(cleanupException);
+            }
+            throw exception;
         }
-        Files.writeString(notePath, transcribedText, StandardCharsets.UTF_8);
 
-        result.put("noteId", timestamp);
+        result.put("noteId", noteId);
         result.put("title", title);
         result.put("transcribedText", transcribedText);
-        result.put("audioFilePath", audioPath.getFileName().toString());
-        result.put("noteFilePath", notePath.getFileName().toString());
+        result.put("audioFilePath", audioKey);
+        result.put("noteFilePath", noteKey);
         result.put("message", "语音笔记保存成功");
-        log.info("语音笔记已保存: {}", noteFileName);
+        log.info("语音笔记已保存: {}", noteKey);
         return result;
     }
 
@@ -118,34 +134,33 @@ public class AccessibilityServiceImpl implements AccessibilityService {
      */
     public Map<String, Object> listVoiceNotes(String owner) throws Exception {
         Map<String, Object> result = new HashMap<>();
-        Path notesDir = Paths.get(accessibilityDir, "notes");
-        if (!Files.exists(notesDir)) {
-            result.put("notes", java.util.Collections.emptyList());
-            result.put("message", "暂无语音笔记");
-            return result;
-        }
-        Path ownerNotesDir = uploadSecurity.ownerDirectory(notesDir, owner);
-
         List<Map<String, String>> notesList = new ArrayList<>();
-        try (var stream = Files.list(ownerNotesDir)) {
-            stream.filter(p -> p.toString().endsWith(".txt"))
-                    .sorted((a, b) -> b.getFileName().toString().compareTo(a.getFileName().toString()))
-                    .forEach(p -> {
-                        try {
-                            Map<String, String> note = new HashMap<>();
-                            note.put("fileName", p.getFileName().toString());
-                            note.put("content", Files.readString(p, StandardCharsets.UTF_8));
-                            notesList.add(note);
-                        } catch (Exception e) {
-                            log.warn("读取笔记文件失败: {}", p);
-                        }
-                    });
+        for (Metadata metadata : objectStorage.list(owner, ObjectStorageKeys.voiceNotePrefix(owner))) {
+            if (!metadata.objectKey().endsWith("/note.txt")) {
+                continue;
+            }
+            try (var input = objectStorage.open(owner, metadata.objectKey())) {
+                Map<String, String> note = new HashMap<>();
+                note.put("fileName", metadata.objectKey());
+                note.put("content", new String(input.readAllBytes(), StandardCharsets.UTF_8));
+                notesList.add(note);
+            } catch (Exception exception) {
+                log.warn("读取笔记对象失败: {}", metadata.objectKey(), exception);
+            }
         }
 
         result.put("notes", notesList);
         result.put("total", notesList.size());
         result.put("message", "共找到 " + notesList.size() + " 条语音笔记");
         return result;
+    }
+
+    private static ManagedObjectStorageService testStorage() {
+        return new ManagedObjectStorageService(
+                new LocalObjectStorageService(
+                        java.nio.file.Path.of(System.getProperty("java.io.tmpdir"),
+                                "fctts-accessibility-tests").toString()),
+                new InMemoryStoredObjectMetadataRepository());
     }
 
     /**

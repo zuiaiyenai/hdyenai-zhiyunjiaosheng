@@ -3,6 +3,9 @@ package com.a09.tts.service;
 import com.a09.tts.repository.CoursewareProjectRepository.ProjectData;
 import com.a09.tts.repository.InMemoryCoursewareProjectRepository;
 import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
+import com.a09.tts.storage.LocalObjectStorageService;
+import com.a09.tts.storage.ManagedObjectStorageService;
 import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
 import com.a09.tts.api.PageResult;
@@ -36,6 +39,8 @@ class CoursewareProjectServiceTest {
 
     @TempDir
     Path tempDirectory;
+    private final InMemoryStoredObjectMetadataRepository objectMetadata =
+            new InMemoryStoredObjectMetadataRepository();
 
     @Test
     void keepsScriptRevisionsScopesOwnerAndPackagesGeneratedAudio() throws Exception {
@@ -47,10 +52,8 @@ class CoursewareProjectServiceTest {
         when(ttsService.tts(anyString(), eq("longxiao"), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(ResponseEntity.ok(new byte[]{82, 73, 70, 70}));
 
-        CoursewareProjectService service = new CoursewareProjectService(pptService, ttsService);
-        ReflectionTestUtils.setField(service, "coursewareDir", tempDirectory.toString());
-        ReflectionTestUtils.setField(service, "ffmpegPath", "ffmpeg");
-        ReflectionTestUtils.setField(service, "ffprobePath", "ffprobe");
+        CoursewareProjectService service = service(
+                pptService, ttsService, new InMemoryCoursewareProjectRepository());
 
         MockMultipartFile ppt = new MockMultipartFile("file", "人工智能导论.pptx",
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -81,8 +84,8 @@ class CoursewareProjectServiceTest {
         assertTrue(withAudio.audioReady());
 
         DownloadArtifact artifact = service.download(created.id(), "alice", "package");
-        assertTrue(artifact.path().toFile().isFile());
-        try (ZipFile zip = new ZipFile(artifact.path().toFile())) {
+        assertTrue(artifact.resource().getFile().isFile());
+        try (ZipFile zip = new ZipFile(artifact.resource().getFile())) {
             assertNotNull(zip.getEntry("人工智能导论.pptx"));
             assertNotNull(zip.getEntry("讲稿/当前讲稿.txt"));
             assertNotNull(zip.getEntry("讲稿/历史版本-00.txt"));
@@ -96,9 +99,8 @@ class CoursewareProjectServiceTest {
         PPTService pptService = mock(PPTService.class);
         when(pptService.processPptAndGenerateContent(any()))
                 .thenReturn("当前使用人数较多，AI 服务暂时繁忙，请稍后重试。");
-        CoursewareProjectService service = new CoursewareProjectService(
-                pptService, mock(TTSService.class));
-        ReflectionTestUtils.setField(service, "coursewareDir", tempDirectory.toString());
+        CoursewareProjectService service = service(
+                pptService, mock(TTSService.class), new InMemoryCoursewareProjectRepository());
 
         MockMultipartFile ppt = new MockMultipartFile("file", "失败示例.pptx",
                 "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -132,7 +134,7 @@ class CoursewareProjectServiceTest {
         assertTrue(!Path.of(stored.sourcePath()).isAbsolute());
         assertTrue(!Path.of(stored.outputPath()).isAbsolute());
         DownloadArtifact artifact = restarted.download(created.id(), "alice", "package");
-        try (ZipFile zip = new ZipFile(artifact.path().toFile())) {
+        try (ZipFile zip = new ZipFile(artifact.resource().getFile())) {
             assertNotNull(zip.getEntry("讲稿/历史版本-00.txt"));
             assertNotNull(zip.getEntry("讲稿/历史版本-01.txt"));
         }
@@ -196,8 +198,16 @@ class CoursewareProjectServiceTest {
 
     private CoursewareProjectService service(PPTService pptService,
                                              InMemoryCoursewareProjectRepository repository) {
+        return service(pptService, mock(TTSService.class), repository);
+    }
+
+    private CoursewareProjectService service(PPTService pptService, TTSService ttsService,
+                                             InMemoryCoursewareProjectRepository repository) {
         CoursewareProjectService service = new CoursewareProjectService(
-                pptService, mock(TTSService.class), new UploadSecurityService(), repository);
+                pptService, ttsService, new UploadSecurityService(), repository,
+                new ManagedObjectStorageService(
+                        new LocalObjectStorageService(tempDirectory.resolve("objects").toString()),
+                        objectMetadata));
         ReflectionTestUtils.setField(service, "coursewareDir", tempDirectory.toString());
         ReflectionTestUtils.setField(service, "ffmpegPath", "ffmpeg");
         ReflectionTestUtils.setField(service, "ffprobePath", "ffprobe");

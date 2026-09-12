@@ -49,7 +49,7 @@ class AsyncTaskMySqlIntegrationTest {
             assertEquals(2, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM async_task WHERE task_id LIKE 'legacy-%' AND status = 'FAILED'",
                     Integer.class));
-            assertEquals(6, jdbc.queryForObject(
+            assertEquals(7, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
 
             JdbcTaskRepository first = repository(url, username, password);

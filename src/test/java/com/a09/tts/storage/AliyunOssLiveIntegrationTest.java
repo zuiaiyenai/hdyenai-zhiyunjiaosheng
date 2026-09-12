@@ -23,6 +23,9 @@ class AliyunOssLiveIntegrationTest {
     @Autowired
     private ObjectStorageService storage;
 
+    @Autowired
+    private ManagedObjectStorageService managedStorage;
+
     @Test
     void uploadsReadsAndDeletesRealObject() throws Exception {
         byte[] content = "fctts-oss-live-verification".getBytes(StandardCharsets.UTF_8);
@@ -31,14 +34,17 @@ class AliyunOssLiveIntegrationTest {
                 MessageDigest.getInstance("SHA-256").digest(content));
 
         try {
-            storage.store(key, new ByteArrayInputStream(content), content.length,
+            managedStorage.store("live-verification", key,
+                    new ByteArrayInputStream(content), content.length,
                     "text/plain", checksum);
             assertTrue(storage.exists(key));
-            try (var input = storage.open(key)) {
+            try (var input = managedStorage.open("live-verification", key)) {
                 assertArrayEquals(content, input.readAllBytes());
             }
         } finally {
-            storage.delete(key);
+            if (storage.exists(key)) {
+                managedStorage.delete("live-verification", key);
+            }
         }
         assertFalse(storage.exists(key));
     }

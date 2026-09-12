@@ -3,10 +3,12 @@ package com.a09.tts.service;
 import com.a09.tts.TestMediaFiles;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.service.impl.AccessibilityServiceImpl;
+import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
+import com.a09.tts.storage.LocalObjectStorageService;
+import com.a09.tts.storage.ManagedObjectStorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -22,8 +24,10 @@ class AccessibilityUploadSecurityTest {
     @Test
     void voiceNotesUseServerKeysAndAreScopedToOwner() throws Exception {
         AccessibilityServiceImpl service = new AccessibilityServiceImpl(
-                mock(MoonshotChatClient.class), new UploadSecurityService());
-        ReflectionTestUtils.setField(service, "accessibilityDir", root.toString());
+                mock(MoonshotChatClient.class), new UploadSecurityService(),
+                new ManagedObjectStorageService(
+                        new LocalObjectStorageService(root.toString()),
+                        new InMemoryStoredObjectMetadataRepository()));
 
         Map<String, Object> alice = service.saveVoiceNote(audio(), "Alice note", "alice");
         service.saveVoiceNote(audio(), "Bob note", "bob");

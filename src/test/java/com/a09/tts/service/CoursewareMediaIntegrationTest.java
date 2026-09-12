@@ -1,5 +1,10 @@
 package com.a09.tts.service;
 
+import com.a09.tts.repository.InMemoryCoursewareProjectRepository;
+import com.a09.tts.security.UploadSecurityService;
+import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
+import com.a09.tts.storage.LocalObjectStorageService;
+import com.a09.tts.storage.ManagedObjectStorageService;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFTextBox;
 import org.junit.jupiter.api.Assumptions;
@@ -44,8 +49,14 @@ class CoursewareMediaIntegrationTest {
         when(ttsService.tts(anyString(), anyString(), anyDouble(), anyDouble(), anyDouble()))
                 .thenReturn(ResponseEntity.ok(oneSecondWav()));
 
-        CoursewareProjectService service = new CoursewareProjectService(pptService, ttsService);
-        ReflectionTestUtils.setField(service, "coursewareDir", tempDirectory.toString());
+        CoursewareProjectService service = new CoursewareProjectService(
+                pptService, ttsService, new UploadSecurityService(),
+                new InMemoryCoursewareProjectRepository(),
+                new ManagedObjectStorageService(
+                        new LocalObjectStorageService(tempDirectory.resolve("objects").toString()),
+                        new InMemoryStoredObjectMetadataRepository()));
+        Path workRoot = tempDirectory.resolve("work");
+        ReflectionTestUtils.setField(service, "coursewareDir", workRoot.toString());
         ReflectionTestUtils.setField(service, "ffmpegPath", "ffmpeg");
         ReflectionTestUtils.setField(service, "ffprobePath", "ffprobe");
 
@@ -61,8 +72,16 @@ class CoursewareMediaIntegrationTest {
         assertTrue(video.videoReady());
         CoursewareProjectService.DownloadArtifact artifact =
                 service.download(project.id(), "alice", "video");
-        assertTrue(Files.size(artifact.path()) > 1000);
-        Path projectDirectory = artifact.path().getParent();
+        assertTrue(artifact.contentLength() > 1000);
+        try (var input = artifact.resource().getInputStream()) {
+            assertTrue(input.readAllBytes().length > 1000);
+        }
+        Path projectDirectory;
+        try (var paths = Files.walk(workRoot)) {
+            projectDirectory = paths
+                    .filter(path -> path.getFileName().toString().equals("recorded-course.mp4"))
+                    .findFirst().orElseThrow().getParent();
+        }
         assertTrue(Files.notExists(projectDirectory.resolve("audio-parts.txt")));
         assertTrue(Files.notExists(projectDirectory.resolve("narration-001.wav")));
         assertTrue(Files.notExists(projectDirectory.resolve("narration-002.wav")));
@@ -70,7 +89,7 @@ class CoursewareMediaIntegrationTest {
         assertTrue(Files.notExists(projectDirectory.resolve("slides")));
         assertTrue(Files.notExists(projectDirectory.resolve("recorded-course.tmp.mp4")));
         assertTrue(Files.isRegularFile(projectDirectory.resolve("narration.wav")));
-        assertTrue(Files.isRegularFile(artifact.path()));
+        assertTrue(Files.isRegularFile(projectDirectory.resolve("recorded-course.mp4")));
     }
 
     private byte[] oneSlidePptx() throws Exception {

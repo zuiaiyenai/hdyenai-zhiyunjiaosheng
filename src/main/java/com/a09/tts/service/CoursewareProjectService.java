@@ -10,6 +10,11 @@ import com.a09.tts.repository.CoursewareProjectRepository;
 import com.a09.tts.repository.CoursewareProjectRepository.ProjectData;
 import com.a09.tts.repository.CoursewareProjectRepository.RevisionData;
 import com.a09.tts.repository.InMemoryCoursewareProjectRepository;
+import com.a09.tts.storage.InMemoryStoredObjectMetadataRepository;
+import com.a09.tts.storage.LocalObjectStorageService;
+import com.a09.tts.storage.ManagedObjectStorageService;
+import com.a09.tts.storage.ObjectStorageKeys;
+import com.a09.tts.storage.StoredObjectMetadataRepository.Metadata;
 import com.a09.tts.util.UploadUtils;
 import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
@@ -20,6 +25,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -59,6 +67,7 @@ public class CoursewareProjectService {
     private final UploadSecurityService uploadSecurity;
     private final CoursewareProjectRepository projectRepository;
     private final ExternalProcessRunner processRunner;
+    private final ManagedObjectStorageService objectStorage;
 
     @Value("${app.courseware-dir:./uploads/courseware}")
     private String coursewareDir;
@@ -73,24 +82,28 @@ public class CoursewareProjectService {
     public CoursewareProjectService(PPTService pptService, TTSService ttsService,
                                     UploadSecurityService uploadSecurity,
                                     CoursewareProjectRepository projectRepository,
-                                    ExternalProcessRunner processRunner) {
+                                    ExternalProcessRunner processRunner,
+                                    ManagedObjectStorageService objectStorage) {
         this.pptService = pptService;
         this.ttsService = ttsService;
         this.uploadSecurity = uploadSecurity;
         this.projectRepository = projectRepository;
         this.processRunner = processRunner;
+        this.objectStorage = objectStorage;
     }
 
     public CoursewareProjectService(PPTService pptService, TTSService ttsService,
                                     UploadSecurityService uploadSecurity,
-                                    CoursewareProjectRepository projectRepository) {
+                                    CoursewareProjectRepository projectRepository,
+                                    ManagedObjectStorageService objectStorage) {
         this(pptService, ttsService, uploadSecurity, projectRepository,
-                new ExternalProcessRunner(Duration.ofMinutes(10)));
+                new ExternalProcessRunner(Duration.ofMinutes(10)), objectStorage);
     }
 
     public CoursewareProjectService(PPTService pptService, TTSService ttsService,
                                     UploadSecurityService uploadSecurity) {
-        this(pptService, ttsService, uploadSecurity, new InMemoryCoursewareProjectRepository());
+        this(pptService, ttsService, uploadSecurity, new InMemoryCoursewareProjectRepository(),
+                testStorage());
     }
 
     public CoursewareProjectService(PPTService pptService, TTSService ttsService) {
@@ -103,7 +116,7 @@ public class CoursewareProjectService {
         String extension = fileName.toLowerCase(Locale.ROOT).endsWith(".pptx") ? ".pptx" : ".ppt";
         String id = UUID.randomUUID().toString();
         Path ownerDirectory = uploadSecurity.ownerDirectory(projectRoot(), owner);
-        uploadSecurity.ensureQuota(ownerDirectory, file.getSize());
+        uploadSecurity.ensureQuota(objectStorage.usedBytes(owner), file.getSize());
         Path directory = ownerDirectory.resolve(id).normalize();
         if (!directory.startsWith(ownerDirectory)) {
             throw new IllegalArgumentException("非法课件项目路径");
@@ -111,9 +124,15 @@ public class CoursewareProjectService {
         Files.createDirectories(directory);
         Path source = directory.resolve("source" + extension);
         Files.copy(file.getInputStream(), source, StandardCopyOption.REPLACE_EXISTING);
+        String objectPrefix = ObjectStorageKeys.coursewarePrefix(owner, id);
+        String sourceKey = ObjectStorageKeys.coursewareProject(owner, id, "source" + extension);
+        try (InputStream input = file.getInputStream()) {
+            objectStorage.store(owner, sourceKey, input, file.getSize(),
+                    file.getContentType(), uploadSecurity.sha256(file));
+        }
 
         ProjectState state = new ProjectState(id, normalizeOwner(owner), stripExtension(fileName),
-                fileName, directory, source, "");
+                fileName, directory, source, objectPrefix, sourceKey, "");
         projects.put(id, state);
         persist(state);
         begin(state);
@@ -124,7 +143,6 @@ public class CoursewareProjectService {
             }
             validateScript(script);
             state.script = script;
-            Files.writeString(directory.resolve("script.txt"), script, StandardCharsets.UTF_8);
             Revision revision = new Revision(0, "根据 PPT 自动生成", script, Instant.now());
             state.revisions.add(revision);
             persistRevision(state, revision);
@@ -164,11 +182,14 @@ public class CoursewareProjectService {
                 validateScript(optimized);
                 state.script = optimized;
                 state.revision++;
+                deleteStored(state, state.audioKey);
                 state.audio = null;
+                state.audioKey = null;
+                deleteStored(state, state.videoKey);
                 state.video = null;
+                state.videoKey = null;
                 Revision revision = new Revision(state.revision, instruction.trim(), optimized, Instant.now());
                 state.revisions.add(revision);
-                saveScript(state);
                 persistRevision(state, revision);
                 succeed(state);
                 return view(state);
@@ -187,12 +208,15 @@ public class CoursewareProjectService {
             try {
                 state.script = script.trim();
                 state.revision++;
+                deleteStored(state, state.audioKey);
                 state.audio = null;
+                state.audioKey = null;
+                deleteStored(state, state.videoKey);
                 state.video = null;
+                state.videoKey = null;
                 Revision revision = new Revision(
                         state.revision, "用户手动修改", state.script, Instant.now());
                 state.revisions.add(revision);
-                saveScript(state);
                 persistRevision(state, revision);
                 succeed(state);
                 return view(state);
@@ -224,11 +248,17 @@ public class CoursewareProjectService {
                     parts.add(part);
                 }
                 state.audio = parts.size() == 1 ? parts.get(0) : concatAudio(state, parts);
+                state.audioKey = ObjectStorageKeys.coursewareProject(
+                        state.owner, state.id, "narration.wav");
+                objectStorage.storeFile(
+                        state.owner, state.audioKey, state.audio, "audio/wav");
                 state.voice = voice;
                 state.speed = speed;
                 state.pitch = pitch;
                 state.rhythm = rhythm;
+                deleteStored(state, state.videoKey);
                 state.video = null;
+                state.videoKey = null;
                 succeed(state);
                 return view(state);
             } catch (IOException | RuntimeException exception) {
@@ -244,14 +274,20 @@ public class CoursewareProjectService {
         synchronized (state) {
             begin(state);
             try {
-                uploadSecurity.ensureQuota(state.directory.getParent(), avatar.getSize());
+                uploadSecurity.ensureQuota(objectStorage.usedBytes(state.owner), avatar.getSize());
                 Path avatarPath = state.directory.resolve("virtual-teacher.png");
                 try (InputStream input = avatar.getInputStream()) {
                     BufferedImage image = ImageIO.read(input);
                     ImageIO.write(image, "png", avatarPath.toFile());
                 }
                 state.avatar = avatarPath;
+                state.avatarKey = ObjectStorageKeys.coursewareProject(
+                        state.owner, state.id, "virtual-teacher.png");
+                objectStorage.storeFile(
+                        state.owner, state.avatarKey, state.avatar, "image/png");
+                deleteStored(state, state.videoKey);
                 state.video = null;
+                state.videoKey = null;
                 succeed(state);
                 return view(state);
             } catch (IOException | RuntimeException exception) {
@@ -267,8 +303,19 @@ public class CoursewareProjectService {
         synchronized (state) {
             begin(state);
             try {
-                if (state.audio == null || !Files.isRegularFile(state.audio)) {
+                materialize(state, state.sourceKey, state.source);
+                if (state.audioKey == null) {
                     throw new IllegalStateException("请先生成讲稿语音");
+                }
+                if (state.audio == null) {
+                    state.audio = state.directory.resolve("narration.wav");
+                }
+                materialize(state, state.audioKey, state.audio);
+                if (state.avatarKey != null) {
+                    if (state.avatar == null) {
+                        state.avatar = state.directory.resolve("virtual-teacher.png");
+                    }
+                    materialize(state, state.avatarKey, state.avatar);
                 }
                 List<Path> slides = renderSlides(state);
                 double audioDuration = probeDuration(state.audio);
@@ -303,6 +350,10 @@ public class CoursewareProjectService {
                 run(command, "录播课程生成失败");
                 Files.move(temporaryOutput, output, StandardCopyOption.REPLACE_EXISTING);
                 state.video = output;
+                state.videoKey = ObjectStorageKeys.coursewareProject(
+                        state.owner, state.id, "recorded-course.mp4");
+                objectStorage.storeFile(
+                        state.owner, state.videoKey, state.video, "video/mp4");
                 succeed(state);
                 return view(state);
             } catch (IOException | RuntimeException exception) {
@@ -320,10 +371,11 @@ public class CoursewareProjectService {
         ProjectState state = requireProject(id, owner);
         synchronized (state) {
             return switch (artifact) {
-                case "audio" -> existing(state.audio, "narration.wav", "audio/wav", "请先生成讲稿语音");
-                case "video" -> existing(state.video, "recorded-course.mp4", "video/mp4", "请先生成录播课程");
-                case "package" -> new DownloadArtifact(buildPackage(state),
-                        safeFileName(state.title) + "-课件材料.zip", "application/zip");
+                case "audio" -> existing(state, state.audioKey,
+                        "narration.wav", "audio/wav", "请先生成讲稿语音");
+                case "video" -> existing(state, state.videoKey,
+                        "recorded-course.mp4", "video/mp4", "请先生成录播课程");
+                case "package" -> packageArtifact(state);
                 default -> throw new IllegalArgumentException("不支持的下载类型");
             };
         }
@@ -447,6 +499,10 @@ public class CoursewareProjectService {
     }
 
     private Path buildPackage(ProjectState state) throws IOException {
+        materialize(state, state.sourceKey, state.source);
+        materializeOptional(state, state.audioKey, state.audio);
+        materializeOptional(state, state.videoKey, state.video);
+        materializeOptional(state, state.avatarKey, state.avatar);
         Path zip = state.directory.resolve("courseware-package.zip");
         try (ZipOutputStream output = new ZipOutputStream(
                 new BufferedOutputStream(Files.newOutputStream(zip)), StandardCharsets.UTF_8)) {
@@ -482,11 +538,21 @@ public class CoursewareProjectService {
         output.closeEntry();
     }
 
-    private DownloadArtifact existing(Path path, String name, String type, String error) {
-        if (path == null || !Files.isRegularFile(path)) {
+    private DownloadArtifact existing(ProjectState state, String objectKey,
+                                      String name, String type, String error) throws IOException {
+        if (objectKey == null) {
             throw new IllegalStateException(error);
         }
-        return new DownloadArtifact(path, name, type);
+        Metadata metadata = objectStorage.requireMetadata(state.owner, objectKey);
+        return new DownloadArtifact(
+                new InputStreamResource(objectStorage.open(state.owner, objectKey)),
+                metadata.size(), name, type);
+    }
+
+    private DownloadArtifact packageArtifact(ProjectState state) throws IOException {
+        Path path = buildPackage(state);
+        return new DownloadArtifact(new FileSystemResource(path), Files.size(path),
+                safeFileName(state.title) + "-课件材料.zip", "application/zip");
     }
 
     private ProjectState requireProject(String id, String owner) {
@@ -512,16 +578,17 @@ public class CoursewareProjectService {
     private ProjectView view(ProjectState state) {
         return new ProjectView(state.id, state.title, state.fileName, state.script, state.revision,
                 state.voice, state.speed, state.pitch, state.rhythm,
-                state.audio != null, state.video != null, state.avatar != null,
+                state.audioKey != null, state.videoKey != null, state.avatarKey != null,
                 state.status, state.errorMessage, state.createdAt, state.updatedAt);
     }
 
     private void persist(ProjectState state) {
         projectRepository.save(new ProjectData(
                 state.id, state.owner, state.title, state.status,
-                relativeKey(state.source), relativeKey(state.directory), state.fileName,
+                state.sourceKey, state.objectPrefix.substring(0, state.objectPrefix.length() - 1),
+                state.fileName,
                 state.script, state.revision, state.voice, state.speed, state.pitch, state.rhythm,
-                relativeKey(state.audio), relativeKey(state.video), relativeKey(state.avatar),
+                state.audioKey, state.videoKey, state.avatarKey,
                 state.errorMessage, state.createdAt, state.updatedAt));
     }
 
@@ -532,18 +599,24 @@ public class CoursewareProjectService {
     }
 
     private ProjectState restore(ProjectData data) {
-        Path directory = UploadUtils.resolveWithin(storageRoot(), data.outputPath());
-        Path source = UploadUtils.resolveWithin(storageRoot(), data.sourcePath());
+        String objectPrefix = ObjectStorageKeys.requireValid(data.outputPath()) + "/";
+        String sourceKey = ObjectStorageKeys.requireValid(data.sourcePath());
+        Path directory = UploadUtils.resolveWithin(storageRoot(), "work/" + data.projectId());
+        Path source = directory.resolve(ObjectStorageKeys.filename(sourceKey));
         ProjectState state = new ProjectState(data.projectId(), data.owner(), data.projectName(),
-                data.fileName(), directory, source, data.script() == null ? "" : data.script());
+                data.fileName(), directory, source, objectPrefix, sourceKey,
+                data.script() == null ? "" : data.script());
         state.revision = data.revision();
         state.voice = data.voice();
         state.speed = data.speed();
         state.pitch = data.pitch();
         state.rhythm = data.rhythm();
-        state.audio = resolveOptional(data.audioPath());
-        state.video = resolveOptional(data.videoPath());
-        state.avatar = resolveOptional(data.avatarPath());
+        state.audioKey = validOptional(data.audioPath());
+        state.videoKey = validOptional(data.videoPath());
+        state.avatarKey = validOptional(data.avatarPath());
+        state.audio = state.audioKey == null ? null : directory.resolve("narration.wav");
+        state.video = state.videoKey == null ? null : directory.resolve("recorded-course.mp4");
+        state.avatar = state.avatarKey == null ? null : directory.resolve("virtual-teacher.png");
         state.status = data.status();
         state.errorMessage = data.errorMessage();
         state.createdAt = data.createdAt();
@@ -561,23 +634,26 @@ public class CoursewareProjectService {
         return state;
     }
 
-    private Path resolveOptional(String storedPath) {
-        return storedPath == null || storedPath.isBlank()
-                ? null : UploadUtils.resolveWithin(storageRoot(), storedPath);
+    private String validOptional(String objectKey) {
+        return objectKey == null || objectKey.isBlank()
+                ? null : ObjectStorageKeys.requireValid(objectKey);
     }
 
-    private String relativeKey(Path path) {
-        if (path == null) {
-            return null;
+    private void materialize(ProjectState state, String objectKey, Path target) throws IOException {
+        objectStorage.copyTo(state.owner, objectKey, target);
+    }
+
+    private void materializeOptional(ProjectState state, String objectKey, Path target)
+            throws IOException {
+        if (objectKey != null && target != null) {
+            materialize(state, objectKey, target);
         }
-        Path root = storageRoot();
-        Path normalized = path.toAbsolutePath().normalize();
-        if (!normalized.startsWith(root)) {
-            throw new IllegalArgumentException("课件文件路径超出上传目录");
+    }
+
+    private void deleteStored(ProjectState state, String objectKey) throws IOException {
+        if (objectKey != null) {
+            objectStorage.delete(state.owner, objectKey);
         }
-        String key = root.relativize(normalized).toString().replace('\\', '/');
-        UploadUtils.resolveWithin(root, key);
-        return key;
     }
 
     private void begin(ProjectState state) {
@@ -604,10 +680,6 @@ public class CoursewareProjectService {
         state.errorMessage = message.length() > 1000 ? message.substring(0, 1000) : message;
         state.updatedAt = Instant.now();
         persist(state);
-    }
-
-    private void saveScript(ProjectState state) throws IOException {
-        Files.writeString(state.directory.resolve("script.txt"), state.script, StandardCharsets.UTF_8);
     }
 
     private String validatePpt(MultipartFile file) {
@@ -689,6 +761,13 @@ public class CoursewareProjectService {
         return owner == null || owner.isBlank() ? "anonymous" : owner;
     }
 
+    private static ManagedObjectStorageService testStorage() {
+        Path root = Path.of(System.getProperty("java.io.tmpdir"), "fctts-courseware-tests");
+        return new ManagedObjectStorageService(
+                new LocalObjectStorageService(root.toString()),
+                new InMemoryStoredObjectMetadataRepository());
+    }
+
     @FunctionalInterface
     private interface SlidePainter {
         void paint(Graphics2D graphics);
@@ -701,6 +780,8 @@ public class CoursewareProjectService {
         private final String fileName;
         private final Path directory;
         private final Path source;
+        private final String objectPrefix;
+        private final String sourceKey;
         private final List<Revision> revisions = new ArrayList<>();
         private String script;
         private int revision;
@@ -711,19 +792,25 @@ public class CoursewareProjectService {
         private Path audio;
         private Path video;
         private Path avatar;
+        private String audioKey;
+        private String videoKey;
+        private String avatarKey;
         private String status = "PENDING";
         private String errorMessage;
         private Instant createdAt = Instant.now();
         private Instant updatedAt = createdAt;
 
         private ProjectState(String id, String owner, String title, String fileName,
-                             Path directory, Path source, String script) {
+                             Path directory, Path source, String objectPrefix,
+                             String sourceKey, String script) {
             this.id = id;
             this.owner = owner;
             this.title = title;
             this.fileName = fileName;
             this.directory = directory;
             this.source = source;
+            this.objectPrefix = objectPrefix;
+            this.sourceKey = sourceKey;
             this.script = script;
         }
     }
@@ -751,6 +838,7 @@ public class CoursewareProjectService {
     ) {
     }
 
-    public record DownloadArtifact(Path path, String fileName, String contentType) {
+    public record DownloadArtifact(
+            Resource resource, long contentLength, String fileName, String contentType) {
     }
 }

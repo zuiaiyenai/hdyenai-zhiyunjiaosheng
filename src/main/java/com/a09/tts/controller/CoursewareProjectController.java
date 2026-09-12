@@ -6,7 +6,6 @@ import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
 import com.a09.tts.task.AsyncTaskService;
 import com.a09.tts.task.AsyncTaskService.TaskSubmission;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -26,7 +25,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 
 @RestController
 @RequestMapping("/courseware/projects")
@@ -137,8 +135,8 @@ public class CoursewareProjectController {
                 .build());
         return ResponseEntity.ok()
                 .headers(headers)
-                .contentLength(Files.size(download.path()))
-                .body(new FileSystemResource(download.path()));
+                .contentLength(download.contentLength())
+                .body(download.resource());
     }
 
     private double effective(Double value) {
