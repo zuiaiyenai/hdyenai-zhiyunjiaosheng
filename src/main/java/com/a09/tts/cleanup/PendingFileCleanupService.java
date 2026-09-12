@@ -1,9 +1,11 @@
 package com.a09.tts.cleanup;
 
+import com.a09.tts.storage.LocalObjectStorageService;
+import com.a09.tts.storage.ObjectStorageService;
 import com.a09.tts.util.UploadUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -12,22 +14,30 @@ import java.nio.file.Path;
 @Service
 public class PendingFileCleanupService {
     public static final String VOICE_STORAGE = "VOICE";
+    public static final String VOICE_OBJECT_STORAGE = "VOICE_OBJECT";
     private static final Logger log = LoggerFactory.getLogger(PendingFileCleanupService.class);
     private final PendingFileCleanupRepository repository;
-    private final Path voiceRoot;
+    private final ObjectStorageService objectStorage;
+    private final Path legacyVoiceRoot;
 
+    @Autowired
     public PendingFileCleanupService(
             PendingFileCleanupRepository repository,
-            @Value("${app.upload-dir}") String uploadDir) {
+            ObjectStorageService objectStorage,
+            @org.springframework.beans.factory.annotation.Value("${app.upload-dir}") String uploadDir) {
         this.repository = repository;
-        this.voiceRoot = Path.of(uploadDir).toAbsolutePath().normalize();
+        this.objectStorage = objectStorage;
+        this.legacyVoiceRoot = Path.of(uploadDir).toAbsolutePath().normalize();
+    }
+
+    PendingFileCleanupService(PendingFileCleanupRepository repository, String localRoot) {
+        this(repository, new LocalObjectStorageService(localRoot), localRoot);
     }
 
     public void deleteOrEnqueue(String storageType, String relativePath) {
-        Path root = root(storageType);
+        requireSupported(storageType);
         try {
-            UploadUtils.resolveWithin(root, relativePath);
-            UploadUtils.deleteWithin(root, relativePath);
+            delete(storageType, relativePath);
         } catch (IllegalArgumentException exception) {
             log.warn("拒绝清理上传目录外的文件: storageType={}", storageType);
         } catch (Exception exception) {
@@ -46,7 +56,8 @@ public class PendingFileCleanupService {
     public void retryPendingFiles() {
         for (PendingFileCleanup entry : repository.findBatch(100)) {
             try {
-                UploadUtils.deleteWithin(root(entry.storageType()), entry.relativePath());
+                requireSupported(entry.storageType());
+                delete(entry.storageType(), entry.relativePath());
                 repository.delete(entry.id());
             } catch (IllegalArgumentException exception) {
                 repository.delete(entry.id());
@@ -58,10 +69,17 @@ public class PendingFileCleanupService {
         }
     }
 
-    private Path root(String storageType) {
-        if (VOICE_STORAGE.equals(storageType)) {
-            return voiceRoot;
+    private void requireSupported(String storageType) {
+        if (!VOICE_STORAGE.equals(storageType) && !VOICE_OBJECT_STORAGE.equals(storageType)) {
+            throw new IllegalArgumentException("不支持的文件清理存储类型");
         }
-        throw new IllegalArgumentException("不支持的文件清理存储类型");
+    }
+
+    private void delete(String storageType, String key) throws Exception {
+        if (VOICE_OBJECT_STORAGE.equals(storageType)) {
+            objectStorage.delete(key);
+            return;
+        }
+        UploadUtils.deleteWithin(legacyVoiceRoot, key);
     }
 }

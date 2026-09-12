@@ -19,6 +19,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.springframework.core.io.Resource;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,7 +51,10 @@ class VoiceLibrarySecurityTest {
         assertTrue(voice != null);
         assertFalse(Path.of(voice.getFilePath()).isAbsolute());
         assertFalse(voice.getFilePath().contains(".."));
-        assertArrayEquals(content, controller.preview(voice.getVoiceId(), owner).getBody());
+        assertEquals("local", voice.getStorageProvider());
+        assertEquals((long) content.length, voice.getFileSize());
+        assertTrue(voice.getChecksumSha256() != null);
+        assertArrayEquals(content, bodyBytes(controller.preview(voice.getVoiceId(), owner)));
 
         MockHttpServletRequest otherUser = requestFor("bob");
         assertEquals(HttpStatus.FORBIDDEN,
@@ -120,15 +124,15 @@ class VoiceLibrarySecurityTest {
         ReflectionTestUtils.setField(controller, "uploadDir", uploadRoot.toString());
         when(service.findById(13)).thenReturn(voice);
 
-        ResponseEntity<byte[]> response = controller.preview(13, requestFor("alice"));
+        ResponseEntity<Resource> response = controller.preview(13, requestFor("alice"));
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertArrayEquals(content, response.getBody());
+        assertArrayEquals(content, bodyBytes(response));
 
         voice.setFilePath("uploads/voice_samples/" + relocated.getFileName());
         response = controller.preview(13, requestFor("alice"));
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertArrayEquals(content, response.getBody());
+        assertArrayEquals(content, bodyBytes(response));
 
         voice.setPublicVisible(false);
         assertEquals(HttpStatus.NOT_FOUND,
@@ -146,7 +150,6 @@ class VoiceLibrarySecurityTest {
         VoiceServiceImpl service = new VoiceServiceImpl();
         PendingFileCleanupService cleanup = mock(PendingFileCleanupService.class);
         ReflectionTestUtils.setField(service, "voiceMapper", mapper);
-        ReflectionTestUtils.setField(service, "uploadDir", nestedRoot.toString());
         ReflectionTestUtils.setField(service, "pendingFileCleanupService", cleanup);
 
         assertEquals(1, service.deleteVoiceById(10));
@@ -227,5 +230,11 @@ class VoiceLibrarySecurityTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setAttribute("username", username);
         return request;
+    }
+
+    private byte[] bodyBytes(ResponseEntity<Resource> response) throws Exception {
+        try (var input = response.getBody().getInputStream()) {
+            return input.readAllBytes();
+        }
     }
 }

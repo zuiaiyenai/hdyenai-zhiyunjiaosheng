@@ -6,6 +6,9 @@ spring:
       - org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration
 
 app:
+  storage:
+    provider: local
+    local-root: ./target/test-uploads/objects
   redis:
     enabled: false
   upload-dir: ./target/test-uploads/voice
@@ -47,3 +50,14 @@ tts:
 sound-clone:
   api:
     url: http://127.0.0.1:1/tts
+
+aliyun:
+  oss:
+    endpoint: "${ALIYUN_OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}"
+    bucket-name: "${ALIYUN_OSS_BUCKET:hdyenai001}"
+    access-key-id: "${ALIYUN_OSS_ACCESS_KEY_ID:${aliyun.nls.access-key-id:}}"
+    access-key-secret: "${ALIYUN_OSS_ACCESS_KEY_SECRET:${aliyun.nls.access-key-secret:}}"
+    connection-timeout: 5s
+    socket-timeout: 30s
+    request-timeout: 2m
+    max-connections: 64

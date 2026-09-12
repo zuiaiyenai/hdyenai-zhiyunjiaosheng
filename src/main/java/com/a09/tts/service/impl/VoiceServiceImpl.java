@@ -4,6 +4,9 @@ import com.a09.tts.cleanup.PendingFileCleanupService;
 import com.a09.tts.mapper.VoiceMapper;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.service.VoiceService;
+import com.a09.tts.storage.ObjectStorageKeys;
+import com.a09.tts.storage.ObjectStorageService;
+import com.a09.tts.storage.StoredObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -15,10 +18,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
-import java.nio.file.Path;
 import com.a09.tts.security.UploadSecurityService;
 import com.a09.tts.security.UploadSecurityService.Type;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
@@ -28,11 +29,11 @@ public class VoiceServiceImpl implements VoiceService {
     @Autowired
     private VoiceMapper voiceMapper;
 
-    @Value("${app.upload-dir}")
-    private String uploadDir;
-
     @Autowired
     private UploadSecurityService uploadSecurity;
+
+    @Autowired
+    private ObjectStorageService objectStorage;
 
     @Autowired
     private PendingFileCleanupService pendingFileCleanupService;
@@ -64,8 +65,13 @@ public class VoiceServiceImpl implements VoiceService {
         Voice voice = voiceMapper.findVoiceById(voiceId);
         int deleted = voiceMapper.deleteVoiceById(voiceId);
         if (deleted == 1 && voice != null && voice.getFilePath() != null) {
+            String storageType = voice.getObjectKey() == null
+                    ? PendingFileCleanupService.VOICE_STORAGE
+                    : PendingFileCleanupService.VOICE_OBJECT_STORAGE;
+            String storageKey = voice.getObjectKey() == null
+                    ? voice.getFilePath() : voice.getObjectKey();
             Runnable cleanup = () -> pendingFileCleanupService.deleteOrEnqueue(
-                    PendingFileCleanupService.VOICE_STORAGE, voice.getFilePath());
+                    storageType, storageKey);
             if (TransactionSynchronizationManager.isSynchronizationActive()) {
                 TransactionSynchronizationManager.registerSynchronization(
                         new TransactionSynchronization() {
@@ -95,13 +101,26 @@ public class VoiceServiceImpl implements VoiceService {
     })
     public Voice upload(String name, String scene, boolean publicVisible, String owner, MultipartFile file)
             throws Exception {
-        Path root = Path.of(uploadDir).toAbsolutePath().normalize();
-        Path saved = uploadSecurity.save(file, root, Type.AUDIO, owner);
+        uploadSecurity.validate(file, Type.AUDIO);
+        Long usedBytes = voiceMapper.sumStoredBytesByOwner(owner);
+        uploadSecurity.ensureQuota(usedBytes == null ? 0 : usedBytes, file.getSize());
+        String key = ObjectStorageKeys.voiceSample(owner, file.getOriginalFilename());
+        String checksum = uploadSecurity.sha256(file);
+        StoredObject stored;
+        try (var input = file.getInputStream()) {
+            stored = objectStorage.store(
+                    key, input, file.getSize(), file.getContentType(), checksum);
+        }
         Voice voice = new Voice();
         voice.setVoiceName(name);
         voice.setApplicationScene(scene);
-        voice.setFilePath(root.relativize(saved).toString().replace('\\', '/'));
-        voice.setMimeType(file.getContentType());
+        voice.setFilePath(stored.objectKey());
+        voice.setObjectKey(stored.objectKey());
+        voice.setStorageProvider(stored.provider());
+        voice.setStorageBucket(stored.bucket());
+        voice.setMimeType(stored.contentType());
+        voice.setFileSize(stored.size());
+        voice.setChecksumSha256(stored.checksumSha256());
         voice.setPublicVisible(publicVisible);
         voice.setOwnerUsername(owner);
         try {
@@ -109,7 +128,7 @@ public class VoiceServiceImpl implements VoiceService {
             return voice;
         } catch (Exception exception) {
             pendingFileCleanupService.deleteOrEnqueue(
-                    PendingFileCleanupService.VOICE_STORAGE, voice.getFilePath());
+                    PendingFileCleanupService.VOICE_OBJECT_STORAGE, voice.getObjectKey());
             throw exception;
         }
     }

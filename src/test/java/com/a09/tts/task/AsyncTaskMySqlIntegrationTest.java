@@ -45,7 +45,7 @@ class AsyncTaskMySqlIntegrationTest {
                     Instant.now(), "应用重启导致任务中断"));
             assertEquals(TaskStatus.FAILED,
                     restarted.findById(restored.id()).orElseThrow().status());
-            assertEquals(4, jdbc.queryForObject(
+            assertEquals(5, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
         } finally {
             flyway.clean();

@@ -147,8 +147,27 @@ public class UploadSecurityService {
                 try { return Files.size(path); } catch (IOException exception) { return 0L; }
             }).sum();
         }
-        if (additionalBytes > userQuota.toBytes() - used) {
+        ensureQuota(used, additionalBytes);
+    }
+
+    public void ensureQuota(long usedBytes, long additionalBytes) {
+        if (usedBytes < 0 || additionalBytes < 0
+                || additionalBytes > userQuota.toBytes() - usedBytes) {
             throw new IllegalArgumentException("用户上传空间配额不足");
+        }
+    }
+
+    public String sha256(MultipartFile file) throws IOException {
+        try (InputStream input = file.getInputStream()) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 不可用", exception);
         }
     }
 

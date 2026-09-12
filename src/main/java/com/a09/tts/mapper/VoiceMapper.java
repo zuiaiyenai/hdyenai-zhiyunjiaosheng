@@ -20,8 +20,10 @@ public interface VoiceMapper {
      * @param voice 包含声音样本的详细信息
      * @return 插入操作影响的行数，成功为1，失败为0
      */
-    @Insert("insert into voice (voice_name, application_scene, file_path, mime_type, public_visible, owner_username) " +
-            "VALUES (#{voiceName}, #{applicationScene}, #{filePath}, #{mimeType}, #{publicVisible}, #{ownerUsername})")
+    @Insert("insert into voice (voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username) " +
+            "VALUES (#{voiceName}, #{applicationScene}, #{filePath}, #{objectKey}, #{storageProvider}, " +
+            "#{storageBucket}, #{mimeType}, #{fileSize}, #{checksumSha256}, #{publicVisible}, #{ownerUsername})")
     @Options(useGeneratedKeys = true, keyProperty = "voiceId")
     public int addVoiceSample(Voice voice);
 
@@ -31,11 +33,13 @@ public interface VoiceMapper {
      * @param voiceName 声音样本名称
      * @return 匹配的声音样本列表（支持重名或者多个匹配结果）
      */
-    @Select("select voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+    @Select("select voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
             "FROM voice where voice_name LIKE CONCAT('%', #{voiceName}, '%')")
     public List<Voice> findVoiceByName(String voiceName);
 
-    @Select("select voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+    @Select("select voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
             "FROM voice WHERE voice_name LIKE CONCAT('%', #{voiceName}, '%') " +
             "AND (public_visible = 1 OR owner_username = #{username})")
     List<Voice> findVisibleVoiceByName(String voiceName, String username);
@@ -45,10 +49,12 @@ public interface VoiceMapper {
      *
      * @return 声音样本的列表
      */
-    @Select("SELECT voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at FROM voice")
+    @Select("SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at FROM voice")
     public List<Voice> findAllVoices();
 
-    @Select("SELECT voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+    @Select("SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
             "FROM voice WHERE public_visible = 1 OR owner_username = #{username}")
     List<Voice> findVisibleVoices(String username);
 
@@ -71,9 +77,13 @@ public interface VoiceMapper {
             "public_visible = #{publicVisible} where voice_id = #{voiceId}")
     public int updateVoiceSample(Voice voice);
 
-    @Select("SELECT voice_id, voice_name, application_scene, file_path, mime_type, public_visible, owner_username, created_at " +
+    @Select("SELECT voice_id, voice_name, application_scene, file_path, object_key, storage_provider, " +
+            "storage_bucket, mime_type, file_size, checksum_sha256, public_visible, owner_username, created_at " +
             "FROM voice WHERE voice_id = #{voiceId}")
     Voice findVoiceById(int voiceId);
+
+    @Select("SELECT COALESCE(SUM(file_size), 0) FROM voice WHERE owner_username = #{ownerUsername}")
+    Long sumStoredBytesByOwner(String ownerUsername);
 }
 
 

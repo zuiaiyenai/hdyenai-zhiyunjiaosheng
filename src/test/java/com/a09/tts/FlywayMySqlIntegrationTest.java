@@ -48,7 +48,7 @@ class FlywayMySqlIntegrationTest {
                                 + "WHERE table_schema = DATABASE() "
                                 + "AND table_name IN ('user', 'voice', 'speaking_history')",
                         Integer.class));
-                assertEquals(4, jdbc.queryForObject(
+                assertEquals(5, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
 
                 UserService userService = first.getBean(UserService.class);
@@ -63,6 +63,11 @@ class FlywayMySqlIntegrationTest {
                         new MockMultipartFile("file", "voice.wav", "audio/wav", TestMediaFiles.wav()));
                 assertNotNull(voice.getVoiceId());
                 assertFalse(Path.of(voice.getFilePath()).isAbsolute());
+                assertNotNull(voice.getObjectKey());
+                assertEquals("local", voice.getStorageProvider());
+                assertEquals("local", voice.getStorageBucket());
+                assertEquals((long) TestMediaFiles.wav().length, voice.getFileSize());
+                assertNotNull(voice.getChecksumSha256());
                 voiceId = voice.getVoiceId();
 
                 assertEquals(1, jdbc.update(
@@ -82,11 +87,14 @@ class FlywayMySqlIntegrationTest {
                 assertTrue(userService.login("phase2_user", "Phase2Password123"));
                 assertEquals(1, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM voice WHERE voice_id = ?", Integer.class, voiceId));
-                assertNotNull(voiceService.findById(voiceId));
+                Voice restoredVoice = voiceService.findById(voiceId);
+                assertNotNull(restoredVoice);
+                assertEquals("local", restoredVoice.getStorageProvider());
+                assertNotNull(restoredVoice.getObjectKey());
                 assertEquals(1, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM speaking_history WHERE session_id = 'phase2-session'",
                         Integer.class));
-                assertEquals(4, jdbc.queryForObject(
+                assertEquals(5, jdbc.queryForObject(
                         "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
             }
         } finally {
@@ -107,6 +115,8 @@ class FlywayMySqlIntegrationTest {
                         "--spring.flyway.validate-on-migrate=true",
                         "--mybatis.configuration.map-underscore-to-camel-case=true",
                         "--app.redis.enabled=false",
+                        "--app.storage.provider=local",
+                        "--app.storage.local-root=" + tempDir.resolve("objects"),
                         "--app.upload-dir=" + tempDir.resolve("voices"),
                         "--jwt.secret=phase2-test-secret-that-is-at-least-32-characters",
                         "--security.auth.enabled=false");

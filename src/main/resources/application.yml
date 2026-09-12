@@ -39,6 +39,9 @@ server:
   port: "${SERVER_PORT:8081}"
 
 app:
+  storage:
+    provider: "${OBJECT_STORAGE_PROVIDER:local}"
+    local-root: "${OBJECT_STORAGE_LOCAL_ROOT:./uploads}"
   observability:
     environment: "${APP_ENVIRONMENT:local}"
     external-services-required: "${EXTERNAL_SERVICES_REQUIRED:false}"
@@ -122,6 +125,15 @@ sound-clone:
     url: "${SOUND_CLONE_API_URL:http://127.0.0.1:9880/tts}"
 
 aliyun:
+  oss:
+    endpoint: "${ALIYUN_OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}"
+    bucket-name: "${ALIYUN_OSS_BUCKET:hdyenai001}"
+    access-key-id: "${ALIYUN_OSS_ACCESS_KEY_ID:${aliyun.nls.access-key-id:}}"
+    access-key-secret: "${ALIYUN_OSS_ACCESS_KEY_SECRET:${aliyun.nls.access-key-secret:}}"
+    connection-timeout: "${ALIYUN_OSS_CONNECTION_TIMEOUT:5s}"
+    socket-timeout: "${ALIYUN_OSS_SOCKET_TIMEOUT:30s}"
+    request-timeout: "${ALIYUN_OSS_REQUEST_TIMEOUT:2m}"
+    max-connections: "${ALIYUN_OSS_MAX_CONNECTIONS:64}"
   nls:
     app-key: "${ALIYUN_NLS_APP_KEY:}"
     token: "${ALIYUN_NLS_TOKEN:}"

@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.a09.tts.pojo.Voice;
 import com.a09.tts.service.VoiceService;
+import com.a09.tts.storage.ObjectStorageKeys;
+import com.a09.tts.storage.ObjectStorageService;
 import com.a09.tts.util.UploadUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -20,6 +22,9 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.MediaType;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,6 +38,9 @@ public class VoiceController {
 
     @Autowired
     private VoiceService voiceService;
+
+    @Autowired
+    private ObjectStorageService objectStorage;
 
     @org.springframework.beans.factory.annotation.Value("${app.upload-dir}")
     private String uploadDir;
@@ -124,23 +132,32 @@ public class VoiceController {
     }
 
     @GetMapping("/{voiceId}/audio")
-    public ResponseEntity<byte[]> preview(@PathVariable int voiceId, HttpServletRequest request) throws Exception {
+    public ResponseEntity<Resource> preview(@PathVariable int voiceId, HttpServletRequest request) throws Exception {
         Voice voice = voiceService.findById(voiceId);
-        if (voice == null || voice.getFilePath() == null) {
+        if (voice == null || (voice.getObjectKey() == null && voice.getFilePath() == null)) {
             return ResponseEntity.notFound().build();
         }
         String username = String.valueOf(request.getAttribute("username"));
         if (!Boolean.TRUE.equals(voice.getPublicVisible()) && !username.equals(voice.getOwnerUsername())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        Path path;
-        byte[] audio;
+        Resource audio;
+        String filename;
         try {
-            path = resolveVoicePath(voice);
-            if (!Files.isRegularFile(path)) {
-                return ResponseEntity.notFound().build();
+            if (voice.getObjectKey() != null && !voice.getObjectKey().isBlank()) {
+                if (!matchesActiveStorage(voice) || !objectStorage.exists(voice.getObjectKey())) {
+                    return ResponseEntity.notFound().build();
+                }
+                filename = ObjectStorageKeys.filename(voice.getObjectKey());
+                audio = resource(objectStorage.open(voice.getObjectKey()), filename, voice.getFileSize());
+            } else {
+                Path path = resolveLegacyVoicePath(voice);
+                if (!Files.isRegularFile(path)) {
+                    return ResponseEntity.notFound().build();
+                }
+                filename = path.getFileName().toString();
+                audio = resource(Files.newInputStream(path), filename, Files.size(path));
             }
-            audio = Files.readAllBytes(path);
         } catch (IllegalArgumentException exception) {
             log.warn("拒绝读取上传目录外的声音文件，voiceId={}", voiceId);
             return ResponseEntity.notFound().build();
@@ -149,11 +166,11 @@ public class VoiceController {
                 .contentType(voice.getMimeType() == null ? MediaType.APPLICATION_OCTET_STREAM
                         : MediaType.parseMediaType(voice.getMimeType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        ContentDisposition.inline().filename(path.getFileName().toString()).build().toString())
+                        ContentDisposition.inline().filename(filename).build().toString())
                 .body(audio);
     }
 
-    private Path resolveVoicePath(Voice voice) {
+    private Path resolveLegacyVoicePath(Voice voice) {
         Path root = Path.of(uploadDir);
         try {
             Path current = UploadUtils.resolveWithin(root, voice.getFilePath());
@@ -181,6 +198,27 @@ public class VoiceController {
         }
         log.info("兼容旧版公开声音路径，voiceId={}", voice.getVoiceId());
         return relocated;
+    }
+
+    private boolean matchesActiveStorage(Voice voice) {
+        return (voice.getStorageProvider() == null
+                || objectStorage.provider().equals(voice.getStorageProvider()))
+                && (voice.getStorageBucket() == null
+                || objectStorage.bucket().equals(voice.getStorageBucket()));
+    }
+
+    private Resource resource(InputStream input, String filename, Long size) {
+        return new InputStreamResource(input) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+
+            @Override
+            public long contentLength() {
+                return size == null ? -1 : size;
+            }
+        };
     }
 
     private boolean canManage(Voice voice, HttpServletRequest request) {
