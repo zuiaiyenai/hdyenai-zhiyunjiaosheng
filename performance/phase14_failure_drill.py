@@ -207,7 +207,7 @@ def task_view(base_url, token, task_id):
     return parse_json(body)
 
 
-def wait_task(base_url, token, task_id, desired, timeout=45):
+def wait_task(base_url, token, task_id, desired, timeout=45, interval=1.0):
     history = []
     last_status = None
 
@@ -226,7 +226,7 @@ def wait_task(base_url, token, task_id, desired, timeout=45):
         return None
 
     view = wait_for(reached, f"task {task_id} in {sorted(desired)}", timeout=timeout,
-                    interval=1.0)
+                    interval=interval)
     return view, history
 
 
@@ -240,9 +240,10 @@ def validate_delete_target(target, parent):
 def run(args):
     project_root = Path(__file__).resolve().parents[1]
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    results_root = project_root / "target" / f"phase14-live-{timestamp}"
+    phase_name = "phase16-failure" if args.real_models else "phase14"
+    results_root = project_root / "target" / f"{phase_name}-live-{timestamp}"
     results_root.mkdir(parents=True, exist_ok=False)
-    raw_path = results_root / "phase14-raw-evidence.json"
+    raw_path = results_root / f"{phase_name}-raw-evidence.json"
     local_config = project_root / "config" / "application-local.yml"
     jar = project_root / "target" / "tts-0.0.1-SNAPSHOT.jar"
     mysql_base = Path(args.mysql_base).resolve()
@@ -252,6 +253,11 @@ def run(args):
     redis_server = Path(args.redis_server).resolve()
     python_exe = Path(args.python_exe).resolve()
     sample_file = project_root / "src" / "main" / "resources" / "static" / "audio-library" / "male-news.mp3"
+    gpt_sovits_home = Path(args.gpt_sovits_home).resolve()
+    model_python = gpt_sovits_home / "runtime" / "python.exe"
+    tts_server = gpt_sovits_home / "api_v2.py"
+    asr_server = project_root / "scripts" / "asr_server.py"
+    asr_model_root = gpt_sovits_home / "tools" / "asr" / "models"
     test_tmp = results_root / "test-tmp"
     mysql_data = results_root / "mysql-data"
     mysql_pid_file = results_root / "mysql-phase14.pid"
@@ -274,11 +280,11 @@ def run(args):
     tts_stub = None
     asr_stub = None
     counters = {"mysql": 0, "redis": 0, "backend-1": 0, "backend-2": 0,
-                "tts-stub": 0, "asr-stub": 0}
+                "tts-stub": 0, "asr-stub": 0, "tts-real": 0, "asr-real": 0}
     daily_before = {"mysql_3306": port_open(3306), "redis_6379": port_open(6379)}
     evidence = {
         "schema_version": 1,
-        "phase": 14,
+        "phase": "16.8" if args.real_models else 14,
         "started_at": utc_now(),
         "application_git_sha": run_command(
             ["git", "rev-parse", "HEAD"], cwd=project_root).stdout.strip(),
@@ -288,8 +294,10 @@ def run(args):
             "daily_services_before": daily_before,
         },
         "dependency_scope": {
-            "gpt_sovits": "loopback HTTP contract stub; real model process not used",
-            "funasr": "loopback HTTP contract stub; real model process not used",
+            "gpt_sovits": "real local model process" if args.real_models
+            else "loopback HTTP contract stub; real model process not used",
+            "funasr": "real local model process" if args.real_models
+            else "loopback HTTP contract stub; real model process not used",
         },
         "results": [],
         "passed": False,
@@ -381,6 +389,27 @@ def run(args):
         wait_http(url, {200}, timeout=30)
         return managed
 
+    def start_real_tts():
+        managed = start_logged(processes, results_root, next_name("tts-real"), [
+            str(model_python), "api_v2.py", "-a", "127.0.0.1", "-p", "9880",
+            "-c", "GPT_SoVITS/configs/tts_infer.yaml",
+        ], cwd=gpt_sovits_home)
+
+        def reachable():
+            status, _ = http_result("http://127.0.0.1:9880/tts", method="HEAD", timeout=3)
+            return status if 200 <= status < 500 else None
+
+        wait_for(reachable, "real GPT-SoVITS HTTP route", timeout=240, interval=1)
+        return managed
+
+    def start_real_asr():
+        managed = start_logged(processes, results_root, next_name("asr-real"), [
+            str(model_python), str(asr_server), "--model-root", str(asr_model_root),
+            "--host", "127.0.0.1", "--port", "9977",
+        ], cwd=gpt_sovits_home)
+        wait_http("http://127.0.0.1:9977/health", {200}, timeout=240)
+        return managed
+
     common_env = os.environ.copy()
     common_env.update({
         "TEMP": str(test_tmp),
@@ -397,7 +426,7 @@ def run(args):
         "OBJECT_STORAGE_LOCAL_ROOT": str(object_root),
         "TTS_API_URL": "http://127.0.0.1:9880/tts",
         "TTS_HEALTH_URL": "http://127.0.0.1:9880/tts",
-        "TTS_API_TIMEOUT": "2s",
+        "TTS_API_TIMEOUT": "30s" if args.real_models else "2s",
         "ASR_API_URL": "http://127.0.0.1:9977/asr",
         "ASR_HEALTH_URL": "http://127.0.0.1:9977/health",
         "EXTERNAL_SERVICES_REQUIRED": "true",
@@ -432,7 +461,8 @@ def run(args):
             "--app.redis.enabled=true", "--management.health.redis.enabled=true",
             "--app.observability.external-services-required=true",
             "--app.observability.probe-timeout=1s",
-            "--tts.api.url=http://127.0.0.1:9880/tts", "--tts.api.timeout=2s",
+            "--tts.api.url=http://127.0.0.1:9880/tts",
+            "--tts.api.timeout=" + ("30s" if args.real_models else "2s"),
             "--asr.api.url=http://127.0.0.1:9977/asr",
             "--http.client.connect-timeout=2s", "--http.client.read-timeout=5s",
             "--app.tasks.worker-count=1", "--app.tasks.poll-interval=100ms",
@@ -453,6 +483,8 @@ def run(args):
     try:
         required = [local_config, mysql_bin, mysql_cli, mysql_admin, redis_server,
                     python_exe, sample_file]
+        if args.real_models:
+            required += [model_python, tts_server, asr_server, asr_model_root]
         missing = [str(path) for path in required if not path.exists()]
         if missing:
             raise RuntimeError("Missing required Phase 14 paths: " + ", ".join(missing))
@@ -490,8 +522,8 @@ def run(args):
             "appendonly no\ndaemonize no\nlogfile \"\"\ndatabases 16\n"
             f"requirepass {redis_password}\n", encoding="utf-8")
         start_redis()
-        tts_stub = start_stub("tts")
-        asr_stub = start_stub("asr")
+        tts_stub = start_real_tts() if args.real_models else start_stub("tts")
+        asr_stub = start_real_asr() if args.real_models else start_stub("asr")
         start_backend(1)
         start_backend(2)
         nginx_started = True
@@ -574,10 +606,16 @@ def run(args):
         })
         save_json(raw_path, evidence)
 
-        tts_body = {"text": "欢迎来到课堂", "voice": "default"}
+        tts_body = {
+            "text": "欢迎来到课堂",
+            "voice": "longxiao" if args.real_models else "default",
+        }
         status, audio = http_result("http://127.0.0.1:8081/voice/synthesize", method="POST",
-                                    body=tts_body, headers=auth_headers(token), timeout=10)
+                                    body=tts_body, headers=auth_headers(token),
+                                    timeout=60 if args.real_models else 10)
         require_status("baseline TTS", status, {200})
+        if args.real_models and (len(audio) < 44 or not audio.startswith(b"RIFF")):
+            raise RuntimeError("Real GPT-SoVITS baseline did not return a WAV payload")
         baseline_audio_hash = sha256(audio)
         tts_stub.stop()
         external_health = wait_http(
@@ -590,22 +628,28 @@ def run(args):
             headers=auth_headers(token), timeout=10)
         tts_seconds = time.monotonic() - tts_started
         require_status("TTS during endpoint outage", tts_status, {503})
-        tts_stub = start_stub("tts")
+        tts_stub = start_real_tts() if args.real_models else start_stub("tts")
         wait_http("http://127.0.0.1:9091/actuator/health/readiness", {200})
-        tts_delay.write_text("5", encoding="utf-8")
-        slow_started = time.monotonic()
-        slow_status, _ = http_result(
-            "http://127.0.0.1:8081/voice/synthesize", method="POST", body=tts_body,
-            headers=auth_headers(token), timeout=10)
-        slow_seconds = time.monotonic() - slow_started
-        require_status("TTS during slow response", slow_status, {503})
-        if slow_seconds > 4:
-            raise RuntimeError(f"TTS timeout was not bounded: {slow_seconds:.3f}s")
+        slow_status = None
+        slow_seconds = None
+        if not args.real_models:
+            tts_delay.write_text("5", encoding="utf-8")
+            slow_started = time.monotonic()
+            slow_status, _ = http_result(
+                "http://127.0.0.1:8081/voice/synthesize", method="POST", body=tts_body,
+                headers=auth_headers(token), timeout=10)
+            slow_seconds = time.monotonic() - slow_started
+            require_status("TTS during slow response", slow_status, {503})
+            if slow_seconds > 4:
+                raise RuntimeError(f"TTS timeout was not bounded: {slow_seconds:.3f}s")
         status, recovered_audio = http_result(
             "http://127.0.0.1:8081/voice/synthesize", method="POST", body=tts_body,
-            headers=auth_headers(token), timeout=10)
+            headers=auth_headers(token), timeout=60 if args.real_models else 10)
         require_status("TTS after recovery", status, {200})
-        if sha256(recovered_audio) != baseline_audio_hash:
+        if args.real_models and (len(recovered_audio) < 44 or
+                                 not recovered_audio.startswith(b"RIFF")):
+            raise RuntimeError("Real GPT-SoVITS recovery did not return a WAV payload")
+        if not args.real_models and sha256(recovered_audio) != baseline_audio_hash:
             raise RuntimeError("TTS contract payload changed after recovery")
         evidence["results"].append({
             "fault": "gpt_sovits_unavailable", "passed": True,
@@ -613,9 +657,12 @@ def run(args):
             "request_during": tts_status, "fast_fail_seconds": round(tts_seconds, 3),
             "error_code": parse_json(tts_error).get("code"),
             "slow_response_status": slow_status,
-            "slow_response_timeout_seconds": round(slow_seconds, 3),
+            "slow_response_timeout_seconds": round(slow_seconds, 3)
+            if slow_seconds is not None else None,
             "request_after": status, "audio_sha256": baseline_audio_hash,
-            "scope": "HTTP contract stub, not the real GPT-SoVITS model process",
+            "recovered_audio_sha256": sha256(recovered_audio),
+            "scope": "real local GPT-SoVITS model process" if args.real_models
+            else "HTTP contract stub, not the real GPT-SoVITS model process",
         })
         save_json(raw_path, evidence)
 
@@ -635,7 +682,7 @@ def run(args):
         failed_view, failed_history = wait_task(
             "http://127.0.0.1:8081", token, failed_task, {"FAILED"}, timeout=30)
         failed_seconds = time.monotonic() - failed_started
-        asr_stub = start_stub("asr")
+        asr_stub = start_real_asr() if args.real_models else start_stub("asr")
         wait_http("http://127.0.0.1:9091/actuator/health/readiness", {200})
         recovered_task = submit_asr("http://127.0.0.1:8081", token, sample_bytes,
                                     "recovered-" + uuid.uuid4().hex)
@@ -652,7 +699,8 @@ def run(args):
             "failure_history": failed_history,
             "recovered_task_status": recovered_view.get("status"),
             "recovered_history": recovered_history,
-            "scope": "HTTP contract stub, not the real FunASR model process",
+            "scope": "real local FunASR model process" if args.real_models
+            else "HTTP contract stub, not the real FunASR model process",
         })
         save_json(raw_path, evidence)
 
@@ -683,12 +731,15 @@ def run(args):
 
         backend2.stop()
         wait_for(lambda: not port_open(8082), "backend-2 port closure", timeout=15)
-        asr_delay.write_text("20", encoding="utf-8")
+        if not args.real_models:
+            asr_delay.write_text("20", encoding="utf-8")
         crash_task = submit_asr("http://127.0.0.1:8081", token, sample_bytes,
                                 "worker-crash-" + uuid.uuid4().hex)
         running_view, running_history = wait_task(
-            "http://127.0.0.1:8081", token, crash_task, {"RUNNING"}, timeout=15)
-        wait_for(asr_active.exists, "delayed ASR request to become active", timeout=10)
+            "http://127.0.0.1:8081", token, crash_task, {"RUNNING"}, timeout=15,
+            interval=0.05 if args.real_models else 1.0)
+        if not args.real_models:
+            wait_for(asr_active.exists, "delayed ASR request to become active", timeout=10)
         crash_started = time.monotonic()
         backend1.stop()
         wait_for(lambda: not port_open(8081), "crashed backend-1 port closure", timeout=15)
@@ -760,7 +811,7 @@ def run(args):
         evidence["passed"] = bool(evidence.get("passed")) and all(ports_closed.values()) \
             and daily_after == daily_before
         save_json(raw_path, evidence)
-    print(f"PHASE14_RESULTS={results_root}")
+    print(f"{phase_name.upper().replace('-', '_')}_RESULTS={results_root}")
     return evidence, raw_path
 
 
@@ -773,6 +824,9 @@ def main():
     parser.add_argument("--java-exe", default="java.exe")
     parser.add_argument("--maven-exe", default="mvn.cmd")
     parser.add_argument("--keep-mysql-data", action="store_true")
+    parser.add_argument("--real-models", action="store_true")
+    parser.add_argument("--gpt-sovits-home",
+                        default=r"D:\BaiduNetdiskDownload\GPT-SoVITS-v2-240821")
     args = parser.parse_args()
     evidence, _ = run(args)
     if not evidence["passed"]:

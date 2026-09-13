@@ -1,0 +1,118 @@
+{
+  "phase": "16.8",
+  "status": "PARTIAL",
+  "formal_run": "phase16-failure-live-20260913203928",
+  "application_git_sha": "43501bf2662fbd053d762aad53da1e81922828de",
+  "started_at": "2026-09-13T20:39:28.128388+00:00",
+  "completed_at": "2026-09-13T20:44:02.034287+00:00",
+  "environment": {
+    "platform": "Windows local host",
+    "topology": "nginx -> backend-1/backend-2 -> isolated MySQL/Redis plus real local GPT-SoVITS/FunASR",
+    "mysql": "dedicated MySQL 8.0.41 on 127.0.0.1:3307",
+    "redis": "dedicated Redis 3.2.100 on 127.0.0.1:6381 DB 15 without persistence",
+    "gpt_sovits": "real local model process on 127.0.0.1:9880",
+    "funasr": "real local model process on 127.0.0.1:9977",
+    "workload_scope": "sequential single-probe recovery drill; no concurrent VU load during fault windows"
+  },
+  "faults": [
+    {
+      "fault": "redis_restart",
+      "status": "VERIFIED",
+      "health_during": 503,
+      "readiness_during": 503,
+      "liveness_during": 200,
+      "fallback_login_statuses": [401, 401, 401, 401, 401, 429],
+      "recovery_seconds": 8.079,
+      "request_after": 200
+    },
+    {
+      "fault": "mysql_restart",
+      "status": "VERIFIED",
+      "health_during": 503,
+      "readiness_during": 503,
+      "liveness_during": 200,
+      "request_during": 500,
+      "request_during_seconds": 2.031,
+      "recovery_seconds": 1.875,
+      "request_after": 200
+    },
+    {
+      "fault": "gpt_sovits_unavailable",
+      "status": "VERIFIED",
+      "health_during": 503,
+      "readiness_during": 503,
+      "request_during": 503,
+      "fast_fail_seconds": 0.031,
+      "request_after": 200,
+      "baseline_and_recovered_payloads_are_wav": true
+    },
+    {
+      "fault": "funasr_unavailable",
+      "status": "VERIFIED",
+      "submission_during": 202,
+      "terminal_status": "FAILED",
+      "terminal_attempts": 3,
+      "terminal_seconds": 2.062,
+      "terminal_error_code": "TASK_EXECUTION_FAILED",
+      "recovered_task_status": "SUCCESS",
+      "recovered_task_attempts": 1
+    },
+    {
+      "fault": "nginx_upstream_failure",
+      "status": "VERIFIED",
+      "failed_backend_port_closed": true,
+      "surviving_backend_readiness": 200,
+      "nginx_requests": 20,
+      "nginx_successful_requests": 20,
+      "twenty_requests_seconds": 18.016,
+      "failed_backend_restart_seconds": 13.625
+    },
+    {
+      "fault": "worker_crash_and_backend_restart",
+      "status": "VERIFIED",
+      "task_before_crash": {
+        "status": "RUNNING",
+        "attempts": 1
+      },
+      "task_after_recovery": {
+        "status": "SUCCESS",
+        "attempts": 2
+      },
+      "worker_recovery_seconds": 14.563,
+      "backend_restart_seconds": 13.312,
+      "nginx_after": 200,
+      "permanent_running_observed": false,
+      "duplicate_terminal_success_observed": false,
+      "external_side_effect_exactly_once_verified": false
+    }
+  ],
+  "acceptance": {
+    "all_six_fault_assertions_passed": true,
+    "bounded_failure_or_terminal_state_observed": true,
+    "business_probe_recovered_after_each_dependency_restart": true,
+    "permanent_running_observed": false,
+    "concurrent_pool_exhaustion_verified_absent": false,
+    "load_during_fault_verified": false
+  },
+  "cleanup": {
+    "test_ports_closed": true,
+    "mysql_data_removed": true,
+    "redis_config_removed": true,
+    "daily_mysql_3306_unchanged": true,
+    "daily_redis_6379_unchanged": true,
+    "daily_gpt_sovits_restored": true,
+    "daily_funasr_restored": true
+  },
+  "evidence_integrity": {
+    "raw_evidence_sha256": "4002AF7B8C7A8C164A71AFCF17F25AD7F113F01A4E0CB77A0624BA8E604CF807",
+    "raw_evidence_git_ignored": true,
+    "credentials_persisted_in_evidence": false
+  },
+  "boundaries": [
+    "No 100 or 200 VU mixed workload ran concurrently with the injected faults.",
+    "No Hikari pending, executor queue, thread-count, or connection-count time series was collected during fault windows.",
+    "A single logical task reached one SUCCESS row after retry; external model side effects were not audited for exactly-once behavior.",
+    "The drill does not prove Redis/MySQL failover, network partition behavior, Nginx process high availability, OSS faults, WebSocket recovery, or cloud operation.",
+    "Recovery observations are single samples, not latency distributions or production SLOs."
+  ]
+}
