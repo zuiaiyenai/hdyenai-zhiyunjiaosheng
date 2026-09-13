@@ -1,0 +1,126 @@
+{
+  "phase": "16.4",
+  "status": "VERIFIED",
+  "executed_at": "2026-09-14T01:34:05+08:00",
+  "scope": "real local FunASR models through direct loopback HTTP /asr",
+  "runtime": {
+    "python": "3.9.13",
+    "funasr": "1.0.27",
+    "torch": "2.0.0+cu118",
+    "modelscope": "1.10.0",
+    "onnxruntime": "1.18.1",
+    "models": [
+      "speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+      "speech_fsmn_vad_zh-cn-16k-common-pytorch",
+      "punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
+    ]
+  },
+  "input": {
+    "source": "test-assets/video-voice-swap-chinese-5s.mp4",
+    "format": "PCM signed 16-bit little-endian, 16000 Hz, mono WAV",
+    "duration_seconds": 5.290687,
+    "bytes": 169380,
+    "sha256": "683C5E1760E979DD704A10C1E61CCEE39C11A542C6C2110A9408421C442C1C5B"
+  },
+  "protocol": {
+    "levels": [1, 2, 4],
+    "waves": 3,
+    "minimum_jobs": 6,
+    "timeout_seconds": 120,
+    "sample_interval_seconds": 0.5,
+    "excludes": [
+      "Spring and Tomcat",
+      "MySQL and Redis",
+      "worker queue wait",
+      "object storage",
+      "GPT-SoVITS and FFmpeg"
+    ]
+  },
+  "warmup": {
+    "success": true,
+    "latency_seconds": 0.3816433,
+    "recognized_text_length": 40
+  },
+  "safe_concurrency": 1,
+  "safe_concurrency_reason": "Concurrency 2 improved throughput by only 3.64% while p95 increased 75.09%; concurrency 4 reduced throughput below concurrency 2 and raised p95 to 3.63x concurrency 1.",
+  "levels": [
+    {
+      "concurrency": 1,
+      "jobs": 6,
+      "success": 6,
+      "failure": 0,
+      "timeout": 0,
+      "throughput_jobs_per_second": 3.48689,
+      "p50_seconds": 0.274851,
+      "p95_seconds": 0.318377,
+      "p99_seconds": 0.321897,
+      "process_cpu_p95_percent": 379.26,
+      "process_cpu_peak_percent": 380.3,
+      "process_rss_peak_mib": 972.54,
+      "host_cpu_p95_percent": 21.76,
+      "host_cpu_peak_percent": 22.9,
+      "host_available_memory_min_mib": 2195.95,
+      "gpu_p95_percent": 19.9,
+      "gpu_peak_percent": 20.0,
+      "gpu_memory_peak_mib": 2679
+    },
+    {
+      "concurrency": 2,
+      "jobs": 6,
+      "success": 6,
+      "failure": 0,
+      "timeout": 0,
+      "throughput_jobs_per_second": 3.613697,
+      "p50_seconds": 0.54629,
+      "p95_seconds": 0.557442,
+      "p99_seconds": 0.557811,
+      "process_cpu_p95_percent": 371.46,
+      "process_cpu_peak_percent": 371.6,
+      "process_rss_peak_mib": 972.56,
+      "host_cpu_p95_percent": 24.04,
+      "host_cpu_peak_percent": 25.3,
+      "host_available_memory_min_mib": 2192.92,
+      "gpu_p95_percent": 26.75,
+      "gpu_peak_percent": 27.0,
+      "gpu_memory_peak_mib": 2679
+    },
+    {
+      "concurrency": 4,
+      "jobs": 12,
+      "success": 12,
+      "failure": 0,
+      "timeout": 0,
+      "throughput_jobs_per_second": 3.536979,
+      "p50_seconds": 1.104779,
+      "p95_seconds": 1.155915,
+      "p99_seconds": 1.161063,
+      "process_cpu_p95_percent": 404.66,
+      "process_cpu_peak_percent": 410.0,
+      "process_rss_peak_mib": 972.7,
+      "host_cpu_p95_percent": 27.28,
+      "host_cpu_peak_percent": 27.8,
+      "host_available_memory_min_mib": 2159.02,
+      "gpu_p95_percent": 60.6,
+      "gpu_peak_percent": 67.0,
+      "gpu_memory_peak_mib": 2672
+    }
+  ],
+  "raw_evidence": {
+    "path": "target/phase16-funasr-20260913173405/phase16-funasr-raw-evidence.json",
+    "sha256": "77795FE5731A0DCCC235EA7F82A1B2015F04704881B61016E33853198BD87636"
+  },
+  "startup_observation": {
+    "initial_blocker": "Numba cache attempted to write inside the read-only external Python installation",
+    "resolution": "Redirect writable runtime caches to ignored target directories without modifying models or inference code",
+    "production_requirement": "Provide writable cache directories and include cold startup in readiness qualification"
+  },
+  "not_verified": [
+    "long audio and encoding matrix",
+    "recognition accuracy benchmark",
+    "Spring and durable worker end-to-end latency",
+    "multi-instance aggregate access to one FunASR service",
+    "real model process restart recovery",
+    "real ASR soak",
+    "Linux container and cloud production hosts"
+  ]
+}
