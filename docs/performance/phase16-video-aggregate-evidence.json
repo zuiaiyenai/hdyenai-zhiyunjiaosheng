@@ -1,0 +1,168 @@
+{
+  "phase": "16.5",
+  "status": "PARTIAL",
+  "executed_at": "2026-09-14T02:09:44+08:00",
+  "scope": "authenticated Spring upload through durable MySQL task, real Alibaba Cloud OSS, FFmpeg, real FunASR, real GPT-SoVITS, FFmpeg output, OSS result and streamed download",
+  "credentials_recorded": false,
+  "environment": {
+    "host": "Windows local workstation",
+    "backend_java": "17.0.19",
+    "backend_port": 8081,
+    "management_port": 9091,
+    "funasr_port": 9977,
+    "gpt_sovits_port": 9880,
+    "database_schema": "fctts_phase16_video_202609140159",
+    "flyway_version": 12,
+    "object_storage": "real Alibaba Cloud OSS"
+  },
+  "protocol": {
+    "voice_type": "longxiao",
+    "include_subtitles": true,
+    "poll_interval_milliseconds": 1000,
+    "client_timeout_seconds": 900,
+    "service_tts_timeout_seconds": 30,
+    "default_video_upload_limit_mib": 50,
+    "case_execution": "serial, one execution per input"
+  },
+  "cases": [
+    {
+      "size_class": "small",
+      "status": "VERIFIED",
+      "input": {
+        "name": "video-voice-swap-chinese-5s.mp4",
+        "duration_seconds": 5.291,
+        "bytes": 178606,
+        "sha256": "43BB865362E7F53AD1D66CD2A9AB495088FC95A8FB49F4792B135F6FD0CA94BA"
+      },
+      "upload_http_status": 202,
+      "upload_seconds": 1.7262603,
+      "task_id": "3d360b7d-66bf-46da-8610-f379f630eea7",
+      "terminal_status": "SUCCESS",
+      "attempts": 1,
+      "end_to_end_seconds": 15.7549585,
+      "output": {
+        "duration_seconds": 5.268,
+        "bytes": 157408,
+        "sha256": "F49789169A917B599A39AD5DD17095F89640B4AE54B50379B21FA8BE8B267C30",
+        "streams": ["h264 video", "aac audio"]
+      },
+      "resources": {
+        "sample_count": 9,
+        "heap_used_peak_mib": 91.024658203125,
+        "gc_pause_count_delta": 1,
+        "gc_pause_seconds_delta": 0.0030000000000000027,
+        "temporary_bytes_peak": 178606,
+        "temporary_bytes_before": 0,
+        "temporary_bytes_after": 0,
+        "drive_d_free_mib_min": 208247.72265625,
+        "backend": {"cpu_p95_percent": 31.211526425787593, "cpu_peak_percent": 31.658326662030976, "rss_peak_mib": 402.234375, "threads_peak": 163},
+        "funasr": {"cpu_p95_percent": 1.224084467033353, "cpu_peak_percent": 1.2263208240499197, "rss_peak_mib": 951.1796875, "threads_peak": 58},
+        "gpt_sovits": {"cpu_p95_percent": 326.31700811688347, "cpu_peak_percent": 336.4363837234421, "rss_peak_mib": 2303.16796875, "threads_peak": 115}
+      }
+    },
+    {
+      "size_class": "medium",
+      "status": "VERIFIED",
+      "input": {
+        "name": "medium-10s.mp4",
+        "duration_seconds": 10.0,
+        "bytes": 278290,
+        "sha256": "3EB3FCA04F5C8AEBF161FD7E8C8AD25F7BAF9D02426081319486B77BFC9CD9EC"
+      },
+      "upload_http_status": 202,
+      "upload_seconds": 0.4077477,
+      "task_id": "9f89e59c-24b1-4628-9666-08f11a0ba9ca",
+      "terminal_status": "SUCCESS",
+      "attempts": 1,
+      "end_to_end_seconds": 23.2457323,
+      "output": {
+        "duration_seconds": 9.985,
+        "bytes": 280482,
+        "sha256": "97EF1A6DD72457F0691BA387AF51BB5B167AA2A1AEB5833E6FEB551FB3D720A8",
+        "streams": ["h264 video", "aac audio"]
+      },
+      "resources": {
+        "sample_count": 18,
+        "heap_used_peak_mib": 94.10051727294922,
+        "gc_pause_count_delta": 3,
+        "gc_pause_seconds_delta": 0.009000000000000001,
+        "temporary_bytes_peak": 278290,
+        "temporary_bytes_before": 0,
+        "temporary_bytes_after": 0,
+        "drive_d_free_mib_min": 208246.70703125,
+        "backend": {"cpu_p95_percent": 38.22009716649038, "cpu_peak_percent": 40.404628875973266, "rss_peak_mib": 410.16796875, "threads_peak": 171},
+        "funasr": {"cpu_p95_percent": 25.17074974696076, "cpu_peak_percent": 121.02986226917864, "rss_peak_mib": 956.38671875, "threads_peak": 58},
+        "gpt_sovits": {"cpu_p95_percent": 322.0357782637308, "cpu_peak_percent": 322.77801425402976, "rss_peak_mib": 2385.0546875, "threads_peak": 115}
+      }
+    },
+    {
+      "size_class": "large",
+      "status": "NOT RUN",
+      "reason": "Default video upload limit is 50 MiB, GPT-SoVITS service timeout is 30 seconds, and the local host had limited memory headroom while all real services were resident. Production protection values were not relaxed for this phase."
+    }
+  ],
+  "failure_summary": {
+    "executed_cases": 2,
+    "success": 2,
+    "failure": 0,
+    "timeout": 0,
+    "warning": "Two serial happy-path samples are functional evidence, not a statistically useful failure-rate or concurrency-capacity estimate."
+  },
+  "restart_verification": {
+    "status": "VERIFIED_AFTER_COMPLETION",
+    "new_backend_pid": 21640,
+    "backend_java": "17.0.19",
+    "readiness": "UP",
+    "tasks_after_restart": [
+      {"task_id": "3d360b7d-66bf-46da-8610-f379f630eea7", "status": "SUCCESS", "attempts": 1},
+      {"task_id": "9f89e59c-24b1-4628-9666-08f11a0ba9ca", "status": "SUCCESS", "attempts": 1}
+    ],
+    "redownload": {
+      "task_id": "3d360b7d-66bf-46da-8610-f379f630eea7",
+      "bytes": 157408,
+      "sha256": "F49789169A917B599A39AD5DD17095F89640B4AE54B50379B21FA8BE8B267C30"
+    },
+    "boundary": "A backend or worker crash while the real model workflow is RUNNING was not executed in this phase."
+  },
+  "cleanup_verification": {
+    "system_temp_before_bytes": 0,
+    "system_temp_after_bytes": 0,
+    "task_work_directories_removed": [
+      "video-1ae8e64c-f901-4038-af81-bb8cacd16d07",
+      "video-4d4ee3ac-c83f-40ab-8f7d-d1cefe7e744d"
+    ],
+    "oss_input_objects_removed": 2,
+    "oss_result_objects_retained": 2,
+    "pending_cleanup_rows": 0,
+    "boundary": "temporary_bytes_peak covers matching system-temp files, not the peak size of the per-task uploads/output directories"
+  },
+  "path_safety_evidence": {
+    "runtime_scope": "normal filenames and authenticated owner path",
+    "code_and_test_scope": [
+      "UploadSecurityService validation and safe original filename",
+      "server-generated and validated object keys",
+      "task owner plus object metadata owner authorization",
+      "streamed InputStreamResource result response",
+      "traversal and cross-owner regression tests"
+    ],
+    "boundary": "No live malicious-filename penetration case was sent to the video endpoint in this run."
+  },
+  "raw_evidence": {
+    "path": "target/phase16-video-20260913180903/phase16-video-raw-evidence.json",
+    "sha256": "25BFC8DDC2075E30CAE300A6C158918A4E3D11B2496031E9AA8C0EF7FA916F75"
+  },
+  "restart_evidence_path": "target/phase16-video-live",
+  "not_verified": [
+    "large video",
+    "concurrent complete video jobs and safe concurrency",
+    "long-duration and codec matrix",
+    "per-stage latency breakdown",
+    "backend or worker crash while a real model task is RUNNING",
+    "real FunASR and GPT-SoVITS outage recovery",
+    "OSS throttling, timeout and network failure",
+    "complete per-task temporary disk peak",
+    "live malicious filename penetration against the video endpoint",
+    "Linux, container, Nginx, multi-instance and cloud topology",
+    "real-media soak"
+  ]
+}
