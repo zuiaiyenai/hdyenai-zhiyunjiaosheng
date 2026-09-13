@@ -4,6 +4,7 @@ package com.a09.tts.controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.a09.tts.pojo.User;
+import com.a09.tts.observability.LoginPerformanceMetrics;
 import com.a09.tts.service.UserService;
 import com.a09.tts.security.LoginRateLimiter;
 import com.a09.tts.security.ClientIpResolver;
@@ -41,6 +42,9 @@ public class UserController {
 
     @Autowired
     private ClientIpResolver clientIpResolver;
+
+    @Autowired
+    private LoginPerformanceMetrics loginPerformanceMetrics;
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, Object>> registerUser(@RequestBody User user) {
@@ -85,6 +89,11 @@ public class UserController {
 
     @PostMapping("/login")
     public ResponseEntity<Map<String, Object>> loginUser(@RequestBody User user, HttpServletRequest request) {
+        return loginPerformanceMetrics.record(LoginPerformanceMetrics.TOTAL,
+                () -> performLogin(user, request));
+    }
+
+    private ResponseEntity<Map<String, Object>> performLogin(User user, HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
         try {
             String username = user.getUsername();
@@ -102,7 +111,8 @@ public class UserController {
             }
             Boolean loginSuccess = userService.login(username, password);
             if (loginSuccess) {
-                String token = jwtUtil.generateToken(username);
+                String token = loginPerformanceMetrics.record(LoginPerformanceMetrics.JWT,
+                        () -> jwtUtil.generateToken(username));
                 result.put("code", 200);
                 result.put("msg", "登陆成功！");
                 result.put("token", token);

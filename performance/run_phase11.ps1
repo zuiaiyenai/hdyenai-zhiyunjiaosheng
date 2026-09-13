@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("phase11", "phase13")]
+    [ValidateSet("phase11", "phase13", "phase16-login")]
     [string]$RunPhase = "phase11",
     [int[]]$UserLevels = @(10, 50, 100, 200),
     [int]$Repetitions = 3,
@@ -19,7 +19,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
-$phaseNumber = if ($RunPhase -eq "phase13") { 13 } else { 11 }
+$phaseNumber = if ($RunPhase -eq "phase13") { 13 } elseif ($RunPhase -eq "phase16-login") { 16 } else { 11 }
 $runId = "p${phaseNumber}_$timestamp"
 $schema = "fctts_phase${phaseNumber}_$timestamp"
 $userPrefix = "phase${phaseNumber}_${runId}_"
@@ -27,6 +27,7 @@ $resultsRoot = Join-Path $projectRoot "target\$RunPhase-live-$timestamp"
 $manifestPath = Join-Path $resultsRoot "run-manifest.json"
 $localConfig = Join-Path $projectRoot "config\application-local.yml"
 $jar = Join-Path $projectRoot "target\tts-0.0.1-SNAPSHOT.jar"
+$javaExe = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\java.exe' } else { $null }
 $backendProcesses = @()
 $redisProcess = $null
 $nginxStarted = $false
@@ -37,9 +38,9 @@ $priorMySqlPassword = $env:MYSQL_PWD
 $priorDbUrl = $env:DB_URL
 $priorSpringDatasourceUrl = $env:SPRING_DATASOURCE_URL
 
-if ($RunPhase -eq "phase11" -and
+if (($RunPhase -eq "phase11" -or $RunPhase -eq "phase16-login") -and
         ($UserLevels.Count -eq 0 -or ($UserLevels | Where-Object { $_ -notin @(10, 50, 100, 200) }))) {
-    throw "Phase 11 UserLevels must contain only 10, 50, 100, and 200"
+    throw "$RunPhase UserLevels must contain only 10, 50, 100, and 200"
 }
 if ($RunPhase -eq "phase13" -and
         ($UserLevels.Count -ne 1 -or $UserLevels[0] -ne 150 -or $Repetitions -ne 1 -or
@@ -54,6 +55,9 @@ if (-not (Test-Path -LiteralPath $K6Exe)) { throw "Portable k6 not found: $K6Exe
 if (-not (Test-Path -LiteralPath $MySqlExe)) { throw "mysql.exe not found: $MySqlExe" }
 if (-not (Test-Path -LiteralPath $RedisCliExe)) { throw "redis-cli.exe not found: $RedisCliExe" }
 if (-not (Test-Path -LiteralPath $RedisServerExe)) { throw "redis-server.exe not found: $RedisServerExe" }
+if (-not $javaExe -or -not (Test-Path -LiteralPath $javaExe)) {
+    throw "JAVA_HOME must point to the project Java runtime"
+}
 
 New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
 
@@ -125,6 +129,7 @@ function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name) {
         "--spring.data.redis.database=$RedisDatabase",
         "--server.port=$ServerPort",
         "--management.server.port=$ManagementPort",
+        "--management.metrics.tags.environment=$RunPhase-$Name",
         '--server.tomcat.mbeanregistry.enabled=true',
         '--app.storage.provider=aliyun-oss',
         '--app.tasks.worker-count=1',
@@ -134,7 +139,7 @@ function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name) {
         '--app.observability.external-services-required=false',
         "--app.observability.environment=$RunPhase-$Name"
     )
-    $process = Start-Process -FilePath 'java.exe' -ArgumentList $arguments -PassThru `
+    $process = Start-Process -FilePath $javaExe -ArgumentList $arguments -PassThru `
         -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     return $process
 }
@@ -219,7 +224,8 @@ try {
         git_sha = (git rev-parse HEAD).Trim()
         started_at = [DateTime]::UtcNow.ToString('o')
         k6_version = (& $K6Exe version | Out-String).Trim()
-        java_version = (& cmd.exe /d /c 'java -version 2>&1' | Out-String).Trim()
+        java_executable = $javaExe
+        java_version = (& $javaExe -version 2>&1 | Out-String).Trim()
         mysql_version = (Invoke-MySql 'SELECT VERSION();' | Out-String).Trim()
         user_levels = $UserLevels
         repetitions = $Repetitions
@@ -228,8 +234,12 @@ try {
         stabilization_seconds = $StabilizationSeconds
         collector_tail_seconds = $CollectorTailSeconds
         topology = 'nginx -> backend-1/backend-2 -> shared MySQL/Redis'
-        lane = 'L0_CORE_API'
-        media_execution = "excluded; DB workers poll every 24h during $RunPhase L0 mixed workload"
+        lane = if ($RunPhase -eq 'phase16-login') { 'LOGIN_PROFILE' } else { 'L0_CORE_API' }
+        media_execution = if ($RunPhase -eq 'phase16-login') {
+            'excluded; sustained login-only profiling with DB workers polling every 24h'
+        } else {
+            "excluded; DB workers poll every 24h during $RunPhase L0 mixed workload"
+        }
         data_baseline = @{ registered_users = 1000; active_users = 200; projects_per_active = 10; historical_tasks_per_active = 50; public_voices = 200 }
         runs = @()
     }
@@ -271,7 +281,8 @@ try {
             $env:SEED = "$runId-$caseId"
             $env:USER_PREFIX = $userPrefix
             $env:SUMMARY_PATH = $summaryPath
-            & $K6Exe run --quiet --out "json=$rawPath" (Join-Path $PSScriptRoot 'core-api.js')
+            $k6Script = if ($RunPhase -eq 'phase16-login') { 'login-profile.js' } else { 'core-api.js' }
+            & $K6Exe run --quiet --out "json=$rawPath" (Join-Path $PSScriptRoot $k6Script)
             $k6ExitCode = $LASTEXITCODE
             $collectorCompleted = $collector.WaitForExit(($collectorDuration + 30) * 1000)
             if (-not $collectorCompleted) {
@@ -314,7 +325,9 @@ try {
         }
     }
     Start-Sleep -Seconds 2
-    if ($schema -match '^fctts_phase(11|13)_[a-z0-9_]+$' -and $schema -ne 'zhiyunjiaos') {
+    $baselineSchema = $schema -match '^fctts_phase(11|13)_[a-z0-9_]+$'
+    $phase16Schema = $schema -match '^fctts_phase16_[a-z0-9_]+$'
+    if (($baselineSchema -or $phase16Schema) -and $schema -ne 'zhiyunjiaos') {
         try { Invoke-MySql "DROP DATABASE IF EXISTS ``$schema``;" } catch { Write-Warning $_ }
     }
     try { & $RedisCliExe -h 127.0.0.1 -p $RedisPort -a $redisPassword -n $RedisDatabase --raw FLUSHDB | Out-Null } catch { Write-Warning $_ }

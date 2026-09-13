@@ -12,7 +12,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($Schema -notmatch '^fctts_phase(11|13)_[a-z0-9_]+$' -or $Schema -eq 'zhiyunjiaos') {
+$baselineSchema = $Schema -match '^fctts_phase(11|13)_[a-z0-9_]+$'
+$phase16Schema = $Schema -match '^fctts_phase16_[a-z0-9_]+$'
+if ((-not $baselineSchema -and -not $phase16Schema) -or $Schema -eq 'zhiyunjiaos') {
     throw "Refusing to seed unsafe schema name: $Schema"
 }
 if ($RunId -notmatch '^[a-z0-9_-]{4,32}$') {
@@ -31,7 +33,9 @@ if (-not (Test-Path -LiteralPath $MySqlExe)) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $localConfig = Join-Path $projectRoot "config\application-local.yml"
-$phaseLabel = if ($Schema -match '^fctts_phase13_') { 'phase13' } else { 'phase11' }
+$phaseLabel = if ($Schema -match '^fctts_phase13_') { 'phase13' }
+    elseif ($Schema -match '^fctts_phase16_') { 'phase16' }
+    else { 'phase11' }
 $targetDir = Join-Path $projectRoot "target\${phaseLabel}-seed"
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 

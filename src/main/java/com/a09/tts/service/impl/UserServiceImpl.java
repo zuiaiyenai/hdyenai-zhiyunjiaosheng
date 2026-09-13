@@ -1,6 +1,7 @@
 package com.a09.tts.service.impl;
 
 import com.a09.tts.mapper.UserMapper;
+import com.a09.tts.observability.LoginPerformanceMetrics;
 import com.a09.tts.pojo.User;
 import com.a09.tts.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,9 @@ public class UserServiceImpl implements UserService {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private LoginPerformanceMetrics loginPerformanceMetrics;
 
     /**
      * 用户注册的服务方法。
@@ -65,12 +69,14 @@ public class UserServiceImpl implements UserService {
      * @return 密码正确则返回true，否则返回false
      */
     public Boolean login(String username, String password) {
-        String storedPassword = userMapper.login(username);
+        String storedPassword = loginPerformanceMetrics.record(LoginPerformanceMetrics.DATABASE,
+                () -> userMapper.login(username));
         if (storedPassword == null) {
             return false;
         }
         if (storedPassword.startsWith("$2")) {
-            return passwordEncoder.matches(password, storedPassword);
+            return loginPerformanceMetrics.record(LoginPerformanceMetrics.BCRYPT,
+                    () -> passwordEncoder.matches(password, storedPassword));
         }
         String legacyHash = new com.a09.tts.util.HashUtil().sha256(password);
         if (legacyHash.equals(storedPassword)) {

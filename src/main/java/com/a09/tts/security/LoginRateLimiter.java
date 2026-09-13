@@ -1,5 +1,6 @@
 package com.a09.tts.security;
 
+import com.a09.tts.observability.LoginPerformanceMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -26,6 +27,7 @@ public class LoginRateLimiter {
     private static final String KEY_PREFIX = "zjys:rate:login:";
 
     private final MeterRegistry meterRegistry;
+    private final LoginPerformanceMetrics loginPerformanceMetrics;
 
     @Autowired(required = false)
     private StringRedisTemplate redisTemplate;
@@ -55,6 +57,7 @@ public class LoginRateLimiter {
 
     public LoginRateLimiter(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
+        this.loginPerformanceMetrics = new LoginPerformanceMetrics(meterRegistry);
     }
 
     @PostConstruct
@@ -67,10 +70,17 @@ public class LoginRateLimiter {
     }
 
     public boolean isBlocked(String ip) {
+        return loginPerformanceMetrics.record(LoginPerformanceMetrics.RATE_LIMIT,
+                () -> checkBlocked(ip));
+    }
+
+    private boolean checkBlocked(String ip) {
         String key = key(ip);
         if (redisAvailable()) {
             try {
-                boolean blocked = Boolean.TRUE.equals(redisTemplate.hasKey(lockKey(key)));
+                boolean blocked = Boolean.TRUE.equals(loginPerformanceMetrics.record(
+                        LoginPerformanceMetrics.REDIS,
+                        () -> redisTemplate.hasKey(lockKey(key))));
                 if (blocked) {
                     rejected("redis");
                 }
@@ -103,11 +113,14 @@ public class LoginRateLimiter {
         String key = key(ip);
         if (redisAvailable()) {
             try {
-                redisTemplate.execute(loginFailureScript,
-                        List.of(failureKey(key), lockKey(key)),
-                        Integer.toString(maxFailures),
-                        Long.toString(window.toMillis()),
-                        Long.toString(lockDuration.toMillis()));
+                loginPerformanceMetrics.record(LoginPerformanceMetrics.REDIS, () -> {
+                    redisTemplate.execute(loginFailureScript,
+                            List.of(failureKey(key), lockKey(key)),
+                            Integer.toString(maxFailures),
+                            Long.toString(window.toMillis()),
+                            Long.toString(lockDuration.toMillis()));
+                    return null;
+                });
                 return;
             } catch (RuntimeException exception) {
                 degraded();

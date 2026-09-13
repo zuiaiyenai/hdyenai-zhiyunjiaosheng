@@ -22,7 +22,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($Schema -notmatch '^fctts_phase(11|13)_[a-z0-9_]+$' -or $Schema -eq 'zhiyunjiaos') {
+$baselineSchema = $Schema -match '^fctts_phase(11|13)_[a-z0-9_]+$'
+$phase16Schema = $Schema -match '^fctts_phase16_[a-z0-9_]+$'
+if ((-not $baselineSchema -and -not $phase16Schema) -or $Schema -eq 'zhiyunjiaos') {
     throw "Refusing unsafe schema name: $Schema"
 }
 if ($DurationSeconds -lt 1 -or $IntervalSeconds -lt 1) {
@@ -40,7 +42,9 @@ $logicalProcessors = [Environment]::ProcessorCount
 $backendProcessIds = @($Backend1ProcessId, $Backend2ProcessId)
 $previousCpu = @{}
 $previousAt = Get-Date
-$phaseLabel = if ($Schema -match '^fctts_phase13_') { 'phase13' } else { 'phase11' }
+$phaseLabel = if ($Schema -match '^fctts_phase13_') { 'phase13' }
+    elseif ($Schema -match '^fctts_phase16_') { 'phase16' }
+    else { 'phase11' }
 
 function Read-LocalScalar([string]$Pattern, [string]$Description) {
     $raw = Get-Content -Raw -LiteralPath $localConfig
@@ -110,6 +114,19 @@ function Read-RedisStatus([string]$Password) {
     } finally {
         $env:REDISCLI_AUTH = $previousPassword
     }
+}
+
+function Read-LoginStageMetrics([string[]]$Texts) {
+    $result = @{}
+    foreach ($stage in @('total', 'rate_limit', 'redis', 'database', 'bcrypt', 'jwt')) {
+        $label = 'stage="' + $stage + '"'
+        $result[$stage] = @{
+            count = Sum-PrometheusMetric $Texts 'fctts_login_stage_seconds_count' $label
+            sum_seconds = Sum-PrometheusMetric $Texts 'fctts_login_stage_seconds_sum' $label
+            max_seconds = Sum-PrometheusMetric $Texts 'fctts_login_stage_seconds_max' $label
+        }
+    }
+    return $result
 }
 
 try {
@@ -188,6 +205,7 @@ try {
             task_rejected = Sum-PrometheusMetric $prometheusTexts 'fctts_task_admission_rejected_total'
             bulkhead_active = Sum-PrometheusMetric $prometheusTexts 'fctts_resource_bulkhead_active'
             bulkhead_rejected = Sum-PrometheusMetric $prometheusTexts 'fctts_resource_bulkhead_rejected_total'
+            login_stage = Read-LoginStageMetrics $prometheusTexts
         }
         $sample = [ordered]@{
             captured_at = [DateTime]::UtcNow.ToString('o')

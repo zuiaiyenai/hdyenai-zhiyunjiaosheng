@@ -1,12 +1,14 @@
 package com.a09.tts.controller;
 
 import com.a09.tts.pojo.User;
+import com.a09.tts.observability.LoginPerformanceMetrics;
 import com.a09.tts.security.LoginRateLimiter;
 import com.a09.tts.security.ClientIpResolver;
 import com.a09.tts.security.PasswordPolicy;
 import com.a09.tts.service.UserService;
 import com.a09.tts.util.JwtUtil;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -77,6 +79,8 @@ class UserControllerSecurityTest {
         ReflectionTestUtils.setField(controller, "passwordPolicy", mock(PasswordPolicy.class));
         ReflectionTestUtils.setField(controller, "loginRateLimiter", limiter);
         ReflectionTestUtils.setField(controller, "clientIpResolver", new ClientIpResolver("127.0.0.1,::1"));
+        ReflectionTestUtils.setField(controller, "loginPerformanceMetrics",
+                new LoginPerformanceMetrics(new SimpleMeterRegistry()));
         return controller;
     }
 }
