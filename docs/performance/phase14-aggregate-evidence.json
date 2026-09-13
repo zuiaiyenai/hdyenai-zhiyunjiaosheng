@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "phase": 14,
+  "executed_at": "2026-09-13",
+  "timezone": "Asia/Shanghai",
+  "evidence_status": "VERIFIED_WITH_CONTRACT_STUB_BOUNDARY",
+  "run_id": "phase14-live-20260913101559",
+  "base_git_sha": "3583e0ebe61d076bc874c1849b14f44c9e817e15",
+  "source_state": "Phase 14 working tree on top of base_git_sha; file hashes bind the tested source",
+  "raw_evidence": {
+    "local_path": "target/phase14-live-20260913101559",
+    "evidence_sha256": "D5765135F82D597135DF3771CDFD683631CA21F7DCEC5FFFE745C892C7F66069",
+    "passed": true,
+    "faults_passed": 6,
+    "faults_total": 6
+  },
+  "source_sha256": {
+    "performance/fault_dependency_stub.py": "04108BE4602003F62C392A32B1A3524D370113B4661C56B080CDFAF56C637782",
+    "performance/phase14_failure_drill.py": "D5214629A38078A6BC531D5F64E821A43F8C0071423ECB080F512A258FA6C66C",
+    "src/main/java/com/a09/tts/service/impl/TTSServiceImpl.java": "51E8025E1D9FD6D4320F0A3971302C0824EF29F6887EE71B39AD354C5BB52452",
+    "src/main/java/com/a09/tts/config/RestTemplateConfig.java": "39FB2DD8EC1DEC8EB2B2CFC8A7B4110BBFAD93CEF856D045B282C155959EC3D2",
+    "src/main/resources/application.yml": "4C823A80EEF521E8B7A6ED62ABFC5ABB71A54E7142855ADCA05E2B9A89129EA6",
+    "src/test/java/com/a09/tts/service/impl/TTSServiceImplLanguageTest.java": "21EC2552C5F81E07FAE37E298CB20EDD77D38153C6FE1402791C2FEE220899BB"
+  },
+  "environment": {
+    "platform": "Windows",
+    "java": "25.0.3",
+    "mysql": "8.0.41 dedicated process on 127.0.0.1:3307",
+    "redis": "3.2.100 dedicated non-persistent process on 127.0.0.1:6381 DB 15",
+    "nginx": "1.22.0 on 127.0.0.1:8080",
+    "backend_instances": 2,
+    "backend_ports": [8081, 8082],
+    "management_ports": [9091, 9092],
+    "tts_contract_stub_port": 9880,
+    "asr_contract_stub_port": 9977
+  },
+  "protocol": {
+    "tts_timeout_seconds": 2,
+    "http_connect_timeout_seconds": 2,
+    "http_read_timeout_seconds": 5,
+    "db_connection_timeout_seconds": 2,
+    "worker_count_per_instance": 1,
+    "worker_poll_interval_ms": 100,
+    "task_stale_after_seconds": 3,
+    "task_recovery_interval_seconds": 1,
+    "repetitions": 1,
+    "object_storage": "shared ephemeral local directory",
+    "external_models": "loopback HTTP contract stubs"
+  },
+  "faults": [
+    {
+      "fault": "redis_restart",
+      "status": "VERIFIED",
+      "process_stop_seconds": 0.187,
+      "health_during": 503,
+      "readiness_during": 503,
+      "liveness_during": 200,
+      "fallback_login_statuses": [401, 401, 401, 401, 401, 429],
+      "recovery_seconds": 7.516,
+      "voice_api_after": 200
+    },
+    {
+      "fault": "mysql_restart",
+      "status": "VERIFIED",
+      "process_stop_seconds": 2.469,
+      "health_during": 503,
+      "readiness_during": 503,
+      "liveness_during": 200,
+      "db_api_during": 500,
+      "db_api_latency_seconds": 2.016,
+      "recovery_seconds": 1.859,
+      "voice_api_after": 200
+    },
+    {
+      "fault": "gpt_sovits_unavailable",
+      "status": "VERIFIED_WITH_CONTRACT_STUB",
+      "request_during": 503,
+      "fast_fail_seconds": 0.031,
+      "slow_response_status": 503,
+      "slow_response_timeout_seconds": 2.015,
+      "request_after": 200
+    },
+    {
+      "fault": "funasr_unavailable",
+      "status": "VERIFIED_WITH_CONTRACT_STUB",
+      "baseline_task_status": "SUCCESS",
+      "submission_during": 202,
+      "terminal_status": "FAILED",
+      "terminal_attempts": 3,
+      "terminal_error_code": "TASK_EXECUTION_FAILED",
+      "terminal_seconds": 2.094,
+      "recovered_task_status": "SUCCESS",
+      "recovered_task_attempts": 1
+    },
+    {
+      "fault": "nginx_upstream_failure",
+      "status": "VERIFIED",
+      "backend_1_port_during": "CLOSED",
+      "backend_2_readiness": 200,
+      "nginx_request_count": 20,
+      "nginx_success_count": 20,
+      "twenty_requests_seconds": 23.390,
+      "backend_1_restart_seconds": 19.000
+    },
+    {
+      "fault": "worker_crash_and_backend_restart",
+      "status": "VERIFIED",
+      "task_status_before_crash": "RUNNING",
+      "task_attempts_before_crash": 1,
+      "task_status_after_recovery": "SUCCESS",
+      "task_attempts_after_recovery": 2,
+      "worker_recovery_seconds": 18.891,
+      "backend_1_restart_seconds": 19.078,
+      "nginx_after": 200
+    }
+  ],
+  "database_outage_observation": {
+    "hikari_connection_timeout_seconds": 2,
+    "hikari_timeout_log_count": 17,
+    "worker_loop_failure_log_count": 26,
+    "stale_recovery_failure_log_count": 8,
+    "assessment": "Database outage made the pool unavailable, but acquisition was bounded and readiness plus DB API recovered. The accelerated 100 ms poll produced a log storm and needs production backoff and log rate limiting."
+  },
+  "cleanup": {
+    "test_ports_closed": 9,
+    "test_ports_total": 9,
+    "isolated_mysql_data_removed": true,
+    "ephemeral_redis_config_removed": true,
+    "daily_mysql_3306_reachable_before_and_after": true,
+    "daily_redis_6379_reachable_before_and_after": true,
+    "daily_service_pids_observed_unchanged": {"mysql_3306": 7412, "redis_6379": 6204}
+  },
+  "validation": {
+    "python_py_compile": "PASS",
+    "script_help": "PASS",
+    "tts_get_probe": "PASS",
+    "asr_chunked_body_smoke": "PASS",
+    "targeted_tts_tests": 7,
+    "maven_tests": 138,
+    "maven_failures": 0,
+    "maven_errors": 0,
+    "maven_skipped": 8,
+    "test_temp_root": "target/phase14-test-tmp"
+  },
+  "verified": [
+    "real isolated Redis restart with degraded login rate limiting and automatic recovery",
+    "real isolated MySQL restart with bounded DB API failure and automatic recovery",
+    "real backend termination with Nginx failover",
+    "real worker crash with stale RUNNING task recovery by another backend",
+    "JWT and database payload continuity across dependency and backend failures"
+  ],
+  "verified_with_contract_stub": [
+    "GPT-SoVITS HTTP connection refusal, slow response timeout, and recovery semantics",
+    "FunASR HTTP unavailability, bounded retries to FAILED, and new-task recovery semantics"
+  ],
+  "not_verified": [
+    "real GPT-SoVITS or FunASR model process restart and model/GPU recovery",
+    "real Aliyun OSS failure and recovery",
+    "Linux, container orchestrator, or cloud host behavior",
+    "repeated recovery-time distributions or recovery SLO percentiles",
+    "network partitions, disk-full faults, Redis HA, MySQL HA, or compound failures",
+    "normal API latency SLO during the failure window",
+    "absence of connection-pool exhaustion under production traffic"
+  ]
+}

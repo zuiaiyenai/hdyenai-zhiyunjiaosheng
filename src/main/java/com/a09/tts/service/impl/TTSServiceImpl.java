@@ -44,6 +44,7 @@ public class TTSServiceImpl implements TTSService {
     );
     private final WebClient webClient;
     private final TaskResourceBulkheads bulkheads;
+    private final Duration requestTimeout;
 
     @Value("${tts.api.url}")
     private String apiUrl;
@@ -58,16 +59,18 @@ public class TTSServiceImpl implements TTSService {
     private String englishVoice;
 
     public TTSServiceImpl(WebClient.Builder webClientBuilder) {
-        this(webClientBuilder, TaskResourceBulkheads.unrestricted());
+        this(webClientBuilder, TaskResourceBulkheads.unrestricted(), Duration.ofSeconds(30));
     }
 
     @Autowired
     public TTSServiceImpl(
-            WebClient.Builder webClientBuilder, TaskResourceBulkheads bulkheads) {
+            WebClient.Builder webClientBuilder, TaskResourceBulkheads bulkheads,
+            @Value("${tts.api.timeout:30s}") Duration requestTimeout) {
         this.webClient = webClientBuilder
                 .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(50 * 1024 * 1024))
                 .build();
         this.bulkheads = bulkheads;
+        this.requestTimeout = requestTimeout;
     }
 
     @Override
@@ -79,6 +82,7 @@ public class TTSServiceImpl implements TTSService {
     public ResponseEntity<byte[]> tts(String text, String voice, double speed, double pitch, double rhythm) {
         try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
             byte[] audio = audioFlux(createRequest(text, voice, speed, pitch, rhythm, false))
+                    .timeout(requestTimeout)
                     .reduce(new ArrayList<byte[]>(), (chunks, buffer) -> {
                         byte[] bytes = new byte[buffer.readableByteCount()];
                         buffer.read(bytes);
@@ -87,7 +91,7 @@ public class TTSServiceImpl implements TTSService {
                         return chunks;
                     })
                     .map(this::join)
-                    .block(Duration.ofMinutes(10));
+                    .block(requestTimeout.plusSeconds(1));
             if (audio == null || audio.length == 0) {
                 throw new ServiceUnavailableException("GPT-SoVITS 未返回音频");
             }
@@ -109,6 +113,7 @@ public class TTSServiceImpl implements TTSService {
                        OutputStream outputStream) throws IOException {
         try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
             audioFlux(createRequest(text, voice, speed, pitch, rhythm, true))
+                    .timeout(requestTimeout)
                     .doOnNext(buffer -> {
                         try {
                             byte[] bytes = new byte[buffer.readableByteCount()];
@@ -122,7 +127,7 @@ public class TTSServiceImpl implements TTSService {
                         }
                     })
                     .then()
-                    .block(Duration.ofMinutes(10));
+                    .block(requestTimeout.plusSeconds(1));
         } catch (UncheckedIOException exception) {
             throw exception.getCause();
         } catch (ResourceCapacityException exception) {
