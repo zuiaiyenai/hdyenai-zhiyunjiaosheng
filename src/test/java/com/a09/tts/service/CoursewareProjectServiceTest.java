@@ -11,6 +11,7 @@ import com.a09.tts.storage.ManagedObjectStorageService;
 import com.a09.tts.service.CoursewareProjectService.DownloadArtifact;
 import com.a09.tts.service.CoursewareProjectService.ProjectView;
 import com.a09.tts.api.PageResult;
+import com.a09.tts.api.ConflictException;
 import com.a09.tts.api.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -167,7 +168,25 @@ class CoursewareProjectServiceTest {
     }
 
     @Test
-    void marksInterruptedProjectFailedAfterServiceRestart() {
+    void reloadsFreshStateWrittenByAnotherServiceInstance() throws Exception {
+        PPTService pptService = mock(PPTService.class);
+        when(pptService.processPptAndGenerateContent(any())).thenReturn("第一版讲稿");
+        InMemoryCoursewareProjectRepository repository = new InMemoryCoursewareProjectRepository();
+        CoursewareProjectService first = service(pptService, repository);
+        CoursewareProjectService second = service(pptService, repository);
+        ProjectView created = first.create(new MockMultipartFile(
+                "file", "双实例.pptx",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                pptx()), "alice");
+        assertEquals("第一版讲稿", first.get(created.id(), "alice").script());
+
+        second.updateScript(created.id(), "alice", "第二个实例写入的讲稿");
+
+        assertEquals("第二个实例写入的讲稿", first.get(created.id(), "alice").script());
+    }
+
+    @Test
+    void doesNotMarkAnotherInstancesProcessingProjectAsFailed() {
         InMemoryCoursewareProjectRepository repository = new InMemoryCoursewareProjectRepository();
         Instant now = Instant.now();
         repository.save(new ProjectData(
@@ -178,11 +197,13 @@ class CoursewareProjectServiceTest {
 
         ProjectView restored = restarted.get("interrupted", "alice");
 
-        assertEquals("FAILED", restored.status());
-        assertEquals("应用重启导致课件处理任务中断", restored.errorMessage());
+        assertEquals("PROCESSING", restored.status());
+        assertEquals(null, restored.errorMessage());
         ProjectData stored = repository.findByIdAndOwner("interrupted", "alice").orElseThrow();
-        assertEquals("FAILED", stored.status());
-        assertEquals("应用重启导致课件处理任务中断", stored.errorMessage());
+        assertEquals("PROCESSING", stored.status());
+        ConflictException conflict = assertThrows(ConflictException.class,
+                () -> restarted.updateScript("interrupted", "alice", "并发覆盖"));
+        assertEquals("COURSEWARE_BUSY", conflict.errorCode());
     }
 
     @Test

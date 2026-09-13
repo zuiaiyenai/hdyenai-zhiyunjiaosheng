@@ -62,7 +62,7 @@ exit /b 1
 
 :ready
 echo [OK] Production frontend is available at %FRONTEND_URL%/
-echo [INFO] API proxy: %FRONTEND_URL%/api/ ^> http://127.0.0.1:8081/
+echo [INFO] API proxy: %FRONTEND_URL%/api/ ^> backend cluster on 127.0.0.1:8081 and 127.0.0.1:8082
 exit /b 0
 
 :find_nginx

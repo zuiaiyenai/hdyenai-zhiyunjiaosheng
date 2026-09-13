@@ -26,6 +26,9 @@ class GlobalExceptionHandlerTest {
         assertError(capacity, HttpStatus.TOO_MANY_REQUESTS,
                 "TASK_GLOBAL_CAPACITY_EXCEEDED", "队列已满");
         assertEquals("3", capacity.getHeaders().getFirst("Retry-After"));
+        assertError(handler.conflict(new ConflictException(
+                        "COURSEWARE_CONCURRENT_UPDATE", "课件已被更新")),
+                HttpStatus.CONFLICT, "COURSEWARE_CONCURRENT_UPDATE", "课件已被更新");
     }
 
     @Test

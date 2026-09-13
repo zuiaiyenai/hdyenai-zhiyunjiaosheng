@@ -2,6 +2,7 @@ package com.a09.tts.service;
 
 import com.a09.tts.api.PageResult;
 import com.a09.tts.api.Pagination;
+import com.a09.tts.api.ConflictException;
 import com.a09.tts.api.ResourceNotFoundException;
 import com.a09.tts.media.ExternalProcessRunner;
 import com.a09.tts.security.UploadSecurityService;
@@ -27,6 +28,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.InputStreamResource;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -52,7 +54,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -62,7 +63,6 @@ public class CoursewareProjectService {
     private static final Logger log = LoggerFactory.getLogger(CoursewareProjectService.class);
     private static final int MAX_SCRIPT_LENGTH = 50000;
     private static final int TTS_CHUNK_LENGTH = 4500;
-    private final Map<String, ProjectState> projects = new ConcurrentHashMap<>();
     private final PPTService pptService;
     private final TTSService ttsService;
     private final UploadSecurityService uploadSecurity;
@@ -138,6 +138,15 @@ public class CoursewareProjectService {
         }
     }
 
+    public void failTask(String id, String owner, String message) {
+        ProjectState state = requireProject(id, owner);
+        synchronized (state) {
+            if ("PENDING".equals(state.status) || "PROCESSING".equals(state.status)) {
+                fail(state, new IllegalStateException(message));
+            }
+        }
+    }
+
     private ProjectState prepareState(MultipartFile file, String owner) throws IOException {
         uploadSecurity.validate(file, Type.PRESENTATION);
         String fileName = validatePpt(file);
@@ -161,7 +170,6 @@ public class CoursewareProjectService {
 
         ProjectState state = new ProjectState(id, normalizeOwner(owner), stripExtension(fileName),
                 fileName, directory, source, objectPrefix, sourceKey, "");
-        projects.put(id, state);
         persist(state);
         return state;
     }
@@ -274,6 +282,7 @@ public class CoursewareProjectService {
         synchronized (state) {
             begin(state);
             try {
+                Files.createDirectories(state.directory);
                 List<String> chunks = splitScript(state.script);
                 List<Path> parts = new ArrayList<>();
                 for (int index = 0; index < chunks.size(); index++) {
@@ -314,6 +323,7 @@ public class CoursewareProjectService {
         synchronized (state) {
             begin(state);
             try {
+                Files.createDirectories(state.directory);
                 uploadSecurity.ensureQuota(objectStorage.usedBytes(state.owner), avatar.getSize());
                 Path avatarPath = state.directory.resolve("virtual-teacher.png");
                 try (InputStream input = avatar.getInputStream()) {
@@ -343,6 +353,7 @@ public class CoursewareProjectService {
         synchronized (state) {
             begin(state);
             try {
+                Files.createDirectories(state.directory);
                 materialize(state, state.sourceKey, state.source);
                 if (state.audioKey == null) {
                     throw new IllegalStateException("请先生成讲稿语音");
@@ -539,6 +550,7 @@ public class CoursewareProjectService {
     }
 
     private Path buildPackage(ProjectState state) throws IOException {
+        Files.createDirectories(state.directory);
         materialize(state, state.sourceKey, state.source);
         materializeOptional(state, state.audioKey, state.audio);
         materializeOptional(state, state.videoKey, state.video);
@@ -597,22 +609,9 @@ public class CoursewareProjectService {
 
     private ProjectState requireProject(String id, String owner) {
         String normalizedOwner = normalizeOwner(owner);
-        ProjectState state = projects.get(id);
-        if (state == null) {
-            state = projectRepository.findByIdAndOwner(id, normalizedOwner)
-                    .map(this::restore)
-                    .orElse(null);
-            if (state != null) {
-                ProjectState existing = projects.putIfAbsent(id, state);
-                if (existing != null) {
-                    state = existing;
-                }
-            }
-        }
-        if (state == null || !state.owner.equals(normalizedOwner)) {
-            throw new ResourceNotFoundException("课件项目不存在或无权访问");
-        }
-        return state;
+        return projectRepository.findByIdAndOwner(id, normalizedOwner)
+                .map(this::restore)
+                .orElseThrow(() -> new ResourceNotFoundException("课件项目不存在或无权访问"));
     }
 
     private ProjectView view(ProjectState state) {
@@ -623,13 +622,18 @@ public class CoursewareProjectService {
     }
 
     private void persist(ProjectState state) {
-        projectRepository.save(new ProjectData(
-                state.id, state.owner, state.title, state.status,
-                state.sourceKey, state.objectPrefix.substring(0, state.objectPrefix.length() - 1),
-                state.fileName,
-                state.script, state.revision, state.voice, state.speed, state.pitch, state.rhythm,
-                state.audioKey, state.videoKey, state.avatarKey,
-                state.errorMessage, state.createdAt, state.updatedAt));
+        try {
+            state.lockVersion = projectRepository.save(new ProjectData(
+                    state.id, state.owner, state.title, state.status,
+                    state.sourceKey, state.objectPrefix.substring(0, state.objectPrefix.length() - 1),
+                    state.fileName,
+                    state.script, state.revision, state.voice, state.speed, state.pitch, state.rhythm,
+                    state.audioKey, state.videoKey, state.avatarKey,
+                    state.errorMessage, state.createdAt, state.updatedAt, state.lockVersion));
+        } catch (OptimisticLockingFailureException exception) {
+            throw new ConflictException("COURSEWARE_CONCURRENT_UPDATE",
+                    "课件已被其他实例更新，请刷新后重试");
+        }
     }
 
     private void persistRevision(ProjectState state, Revision revision) {
@@ -665,12 +669,7 @@ public class CoursewareProjectService {
         state.errorMessage = data.errorMessage();
         state.createdAt = data.createdAt();
         state.updatedAt = data.updatedAt();
-        if ("PROCESSING".equals(state.status)) {
-            state.status = "FAILED";
-            state.errorMessage = "应用重启导致课件处理任务中断";
-            state.updatedAt = Instant.now();
-            persist(state);
-        }
+        state.lockVersion = data.lockVersion();
         for (RevisionData revision : revisions) {
             state.revisions.add(new Revision(revision.revisionNumber(), revision.instruction(),
                     revision.script(), revision.createdAt()));
@@ -701,6 +700,9 @@ public class CoursewareProjectService {
     }
 
     private void begin(ProjectState state) {
+        if ("PROCESSING".equals(state.status)) {
+            throw new ConflictException("COURSEWARE_BUSY", "课件正在由其他任务处理");
+        }
         state.status = "PROCESSING";
         state.errorMessage = null;
         state.updatedAt = Instant.now();
@@ -848,6 +850,7 @@ public class CoursewareProjectService {
         private String errorMessage;
         private Instant createdAt = Instant.now();
         private Instant updatedAt = createdAt;
+        private long lockVersion = -1;
 
         private ProjectState(String id, String owner, String title, String fileName,
                              Path directory, Path source, String objectPrefix,

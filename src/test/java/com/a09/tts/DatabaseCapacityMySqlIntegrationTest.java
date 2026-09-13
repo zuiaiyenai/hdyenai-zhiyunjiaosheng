@@ -72,7 +72,7 @@ class DatabaseCapacityMySqlIntegrationTest {
             jdbc.queryForList(
                     "ANALYZE TABLE voice, courseware_project, async_task, stored_object_metadata");
 
-            assertEquals(10, jdbc.queryForObject(
+            assertEquals(11, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
             assertEquals(4, jdbc.queryForObject("""
                     SELECT COUNT(DISTINCT table_name, index_name)

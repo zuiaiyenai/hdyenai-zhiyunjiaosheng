@@ -1,6 +1,7 @@
 package com.a09.tts.repository;
 
 import org.springframework.context.annotation.Profile;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -17,7 +18,7 @@ public class JdbcCoursewareProjectRepository implements CoursewareProjectReposit
     private static final String PROJECT_COLUMNS = """
             project_id, owner_username, project_name, status, source_path, output_path, file_name,
             script, revision, voice, speed, pitch, rhythm, audio_path, video_path, avatar_path,
-            error_message, created_at, updated_at
+            error_message, created_at, updated_at, lock_version
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -27,28 +28,41 @@ public class JdbcCoursewareProjectRepository implements CoursewareProjectReposit
     }
 
     @Override
-    public void save(ProjectData project) {
-        jdbcTemplate.update("""
+    public long save(ProjectData project) {
+        if (project.lockVersion() < 0) {
+            jdbcTemplate.update("""
                 INSERT INTO courseware_project (
                     project_id, owner_username, project_name, status, source_path, output_path,
                     file_name, script, revision, voice, speed, pitch, rhythm, audio_path,
                     video_path, avatar_path, error_message, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    project_name = VALUES(project_name), status = VALUES(status),
-                    source_path = VALUES(source_path), output_path = VALUES(output_path),
-                    file_name = VALUES(file_name), script = VALUES(script),
-                    revision = VALUES(revision), voice = VALUES(voice),
-                    speed = VALUES(speed), pitch = VALUES(pitch), rhythm = VALUES(rhythm),
-                    audio_path = VALUES(audio_path), video_path = VALUES(video_path),
-                    avatar_path = VALUES(avatar_path), error_message = VALUES(error_message),
-                    updated_at = VALUES(updated_at)
                 """,
                 project.projectId(), project.owner(), project.projectName(), project.status(),
                 project.sourcePath(), project.outputPath(), project.fileName(), project.script(),
                 project.revision(), project.voice(), project.speed(), project.pitch(), project.rhythm(),
                 project.audioPath(), project.videoPath(), project.avatarPath(), project.errorMessage(),
                 Timestamp.from(project.createdAt()), Timestamp.from(project.updatedAt()));
+            return 0;
+        }
+        int updated = jdbcTemplate.update("""
+                UPDATE courseware_project SET
+                    project_name = ?, status = ?, source_path = ?, output_path = ?,
+                    file_name = ?, script = ?, revision = ?, voice = ?, speed = ?,
+                    pitch = ?, rhythm = ?, audio_path = ?, video_path = ?, avatar_path = ?,
+                    error_message = ?, updated_at = ?, lock_version = lock_version + 1
+                WHERE project_id = ? AND owner_username = ? AND lock_version = ?
+                """,
+                project.projectName(), project.status(), project.sourcePath(), project.outputPath(),
+                project.fileName(), project.script(), project.revision(), project.voice(),
+                project.speed(), project.pitch(), project.rhythm(), project.audioPath(),
+                project.videoPath(), project.avatarPath(), project.errorMessage(),
+                Timestamp.from(project.updatedAt()), project.projectId(), project.owner(),
+                project.lockVersion());
+        if (updated != 1) {
+            throw new OptimisticLockingFailureException(
+                    "Courseware project was changed by another instance");
+        }
+        return project.lockVersion() + 1;
     }
 
     @Override
@@ -137,6 +151,7 @@ public class JdbcCoursewareProjectRepository implements CoursewareProjectReposit
                 resultSet.getString("avatar_path"),
                 resultSet.getString("error_message"),
                 resultSet.getTimestamp("created_at").toInstant(),
-                resultSet.getTimestamp("updated_at").toInstant());
+                resultSet.getTimestamp("updated_at").toInstant(),
+                resultSet.getLong("lock_version"));
     }
 }

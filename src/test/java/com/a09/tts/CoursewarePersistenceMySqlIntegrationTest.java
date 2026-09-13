@@ -8,6 +8,7 @@ import com.a09.tts.storage.StoredObjectMetadataRepository.Metadata;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -15,6 +16,7 @@ import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @EnabledIfEnvironmentVariable(named = "MYSQL_INTEGRATION_URL", matches = "jdbc:mysql:.*")
 class CoursewarePersistenceMySqlIntegrationTest {
@@ -65,6 +67,10 @@ class CoursewarePersistenceMySqlIntegrationTest {
 
             assertEquals("courseware/owner/project/source.pptx", restored.sourcePath());
             assertEquals("courseware/owner/project/narration.wav", restored.audioPath());
+            assertEquals(0, restored.lockVersion());
+            assertEquals(1, first.save(restored));
+            assertThrows(OptimisticLockingFailureException.class,
+                    () -> restarted.save(restored));
             assertEquals(1, restarted.findRevisions(restored.projectId()).size());
             assertFalse(restarted.findByIdAndOwner(restored.projectId(), "bob").isPresent());
 
@@ -81,7 +87,7 @@ class CoursewarePersistenceMySqlIntegrationTest {
                     "courseware/owner/project/source.pptx", "bob").isPresent());
             objects.delete("courseware/owner/project/source.pptx", "alice");
             assertEquals(0, objects.sumSizeByOwner("alice"));
-            assertEquals(10, jdbc.queryForObject(
+            assertEquals(11, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1", Integer.class));
         } finally {
             flyway.clean();

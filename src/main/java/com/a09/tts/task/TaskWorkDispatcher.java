@@ -33,6 +33,9 @@ public class TaskWorkDispatcher implements TaskDispatcher {
     private static final Set<String> OBJECT_RESULT_TYPES = Set.of(
             "ASR_TRANSCRIBE", "VOICE_NOTE", "VIDEO_SUBTITLES", "VIDEO_VOICE_SWAP",
             "SOUND_CLONE", "SPEAKING_EVALUATION", "PPT_SUMMARY");
+    private static final Set<String> COURSEWARE_TASK_TYPES = Set.of(
+            "COURSEWARE_CREATE", "COURSEWARE_OPTIMIZE", "COURSEWARE_AUDIO",
+            "COURSEWARE_VIDEO");
 
     private final ManagedObjectStorageService objectStorage;
     private final ASRService asrService;
@@ -86,6 +89,10 @@ public class TaskWorkDispatcher implements TaskDispatcher {
 
     @Override
     public void cleanup(TaskRecord task) {
+        if (COURSEWARE_TASK_TYPES.contains(task.type())) {
+            cleanupCourseware(task);
+            return;
+        }
         if (!OBJECT_RESULT_TYPES.contains(task.type())) {
             return;
         }
@@ -97,6 +104,25 @@ public class TaskWorkDispatcher implements TaskDispatcher {
             }
         } catch (Exception exception) {
             log.warn("无法解析任务输入清理信息: taskId={}", task.id(), exception);
+        }
+    }
+
+    private void cleanupCourseware(TaskRecord task) {
+        try {
+            String projectId = switch (task.type()) {
+                case "COURSEWARE_CREATE" -> payload(
+                        task, TaskPayloads.CoursewareCreate.class).projectId();
+                case "COURSEWARE_OPTIMIZE" -> payload(
+                        task, TaskPayloads.CoursewareOptimize.class).projectId();
+                case "COURSEWARE_AUDIO" -> payload(
+                        task, TaskPayloads.CoursewareAudio.class).projectId();
+                case "COURSEWARE_VIDEO" -> payload(
+                        task, TaskPayloads.CoursewareVideo.class).projectId();
+                default -> throw new IllegalArgumentException("未知课件任务类型");
+            };
+            coursewareService.failTask(projectId, task.owner(), "课件任务未完成");
+        } catch (Exception exception) {
+            log.warn("无法清理未完成课件任务: taskId={}", task.id(), exception);
         }
     }
 

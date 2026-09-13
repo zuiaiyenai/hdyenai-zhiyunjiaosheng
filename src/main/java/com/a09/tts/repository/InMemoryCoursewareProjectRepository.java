@@ -1,6 +1,7 @@
 package com.a09.tts.repository;
 
 import org.springframework.context.annotation.Profile;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
@@ -17,8 +18,26 @@ public class InMemoryCoursewareProjectRepository implements CoursewareProjectRep
             new ConcurrentHashMap<>();
 
     @Override
-    public void save(ProjectData project) {
-        projects.put(project.projectId(), project);
+    public long save(ProjectData project) {
+        if (project.lockVersion() < 0) {
+            ProjectData existing = projects.putIfAbsent(
+                    project.projectId(), project.withLockVersion(0));
+            if (existing != null) {
+                throw new OptimisticLockingFailureException(
+                        "Courseware project already exists");
+            }
+            return 0;
+        }
+        long nextVersion = project.lockVersion() + 1;
+        projects.compute(project.projectId(), (id, current) -> {
+            if (current == null || !current.owner().equals(project.owner())
+                    || current.lockVersion() != project.lockVersion()) {
+                throw new OptimisticLockingFailureException(
+                        "Courseware project was changed by another instance");
+            }
+            return project.withLockVersion(nextVersion);
+        });
+        return nextVersion;
     }
 
     @Override

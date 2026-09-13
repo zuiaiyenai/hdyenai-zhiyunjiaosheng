@@ -50,6 +50,12 @@ public class GlobalExceptionHandler {
                 .body(ApiError.of(404, "RESOURCE_NOT_FOUND", exception.getMessage()));
     }
 
+    @ExceptionHandler(ConflictException.class)
+    ResponseEntity<ApiError> conflict(ConflictException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiError.of(409, exception.errorCode(), exception.getMessage()));
+    }
+
     @ExceptionHandler(TaskCapacityException.class)
     ResponseEntity<ApiError> taskCapacity(TaskCapacityException exception) {
         long retryAfterSeconds = Math.max(1,
