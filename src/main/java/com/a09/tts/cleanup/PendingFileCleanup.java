@@ -8,6 +8,8 @@ public record PendingFileCleanup(
         String relativePath,
         int attempts,
         String lastError,
+        String claimedBy,
+        Instant claimedAt,
         Instant createdAt,
         Instant updatedAt
 ) {

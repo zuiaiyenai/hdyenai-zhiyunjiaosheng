@@ -10,6 +10,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 
 @Service
 public class PendingFileCleanupService {
@@ -19,19 +22,27 @@ public class PendingFileCleanupService {
     private final PendingFileCleanupRepository repository;
     private final ObjectStorageService objectStorage;
     private final Path legacyVoiceRoot;
+    private final Duration claimTimeout;
 
     @Autowired
     public PendingFileCleanupService(
             PendingFileCleanupRepository repository,
             ObjectStorageService objectStorage,
-            @org.springframework.beans.factory.annotation.Value("${app.upload-dir}") String uploadDir) {
+            @org.springframework.beans.factory.annotation.Value("${app.upload-dir}") String uploadDir,
+            @org.springframework.beans.factory.annotation.Value("${app.cleanup.claim-timeout:15m}")
+            Duration claimTimeout) {
         this.repository = repository;
         this.objectStorage = objectStorage;
         this.legacyVoiceRoot = Path.of(uploadDir).toAbsolutePath().normalize();
+        if (claimTimeout == null || claimTimeout.isZero() || claimTimeout.isNegative()) {
+            throw new IllegalArgumentException("Cleanup claim timeout must be positive");
+        }
+        this.claimTimeout = claimTimeout;
     }
 
     PendingFileCleanupService(PendingFileCleanupRepository repository, String localRoot) {
-        this(repository, new LocalObjectStorageService(localRoot), localRoot);
+        this(repository, new LocalObjectStorageService(localRoot), localRoot,
+                Duration.ofMinutes(15));
     }
 
     public void deleteOrEnqueue(String storageType, String relativePath) {
@@ -54,16 +65,20 @@ public class PendingFileCleanupService {
 
     @Scheduled(fixedDelayString = "${app.cleanup.retry-delay:5m}")
     public void retryPendingFiles() {
-        for (PendingFileCleanup entry : repository.findBatch(100)) {
+        Instant now = Instant.now();
+        String claimToken = UUID.randomUUID().toString();
+        for (PendingFileCleanup entry : repository.claimBatch(
+                100, claimToken, now, now.minus(claimTimeout))) {
             try {
                 requireSupported(entry.storageType());
                 delete(entry.storageType(), entry.relativePath());
-                repository.delete(entry.id());
+                repository.complete(entry.id(), claimToken);
             } catch (IllegalArgumentException exception) {
-                repository.delete(entry.id());
-                log.warn("丢弃超出存储根目录的待清理记录: cleanupId={}", entry.id());
+                repository.complete(entry.id(), claimToken);
+                log.warn("丢弃非法待清理记录: cleanupId={}, reason={}",
+                        entry.id(), exception.getMessage());
             } catch (Exception exception) {
-                repository.markFailed(entry.id(), "文件清理失败");
+                repository.markFailed(entry.id(), claimToken, "文件清理失败");
                 log.warn("待清理文件重试失败: cleanupId={}", entry.id());
             }
         }

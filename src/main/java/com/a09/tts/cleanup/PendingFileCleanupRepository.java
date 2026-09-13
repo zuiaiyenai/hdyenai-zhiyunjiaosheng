@@ -1,5 +1,6 @@
 package com.a09.tts.cleanup;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface PendingFileCleanupRepository {
@@ -7,7 +8,10 @@ public interface PendingFileCleanupRepository {
 
     List<PendingFileCleanup> findBatch(int limit);
 
-    void markFailed(long id, String errorMessage);
+    List<PendingFileCleanup> claimBatch(
+            int limit, String claimToken, Instant claimedAt, Instant staleBefore);
 
-    void delete(long id);
+    boolean markFailed(long id, String claimToken, String errorMessage);
+
+    boolean complete(long id, String claimToken);
 }
