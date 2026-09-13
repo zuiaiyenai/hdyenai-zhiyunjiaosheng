@@ -1,0 +1,168 @@
+{
+  "phase": "16.6",
+  "status": "VERIFIED",
+  "executed_at": "2026-09-14T02:56:12+08:00",
+  "scope": "real Alibaba Cloud OSS through the application's streaming ObjectStorageService from a local Windows Java 17 process",
+  "credentials_recorded": false,
+  "storage_location_recorded": false,
+  "runtime": {
+    "java": "17.0.19",
+    "sdk_path": "AliyunOssObjectStorageService",
+    "connection_timeout_seconds": 5,
+    "socket_timeout_seconds": 30,
+    "request_timeout_seconds": 120,
+    "max_connections": 64
+  },
+  "protocol": {
+    "serial_sizes_mib": [10, 100, 500],
+    "stream_buffer_bytes": 1048576,
+    "sparse_zero_source_files": true,
+    "full_content_length_transferred": true,
+    "sha256_integrity_check": true,
+    "concurrent_uploads": 4,
+    "concurrent_object_size_mib": 10,
+    "unique_object_prefix": true
+  },
+  "serial_cases": [
+    {
+      "size_mib": 10,
+      "bytes": 10485760,
+      "status": "VERIFIED",
+      "sha256": "e5b844cc57f57094ea4585e235f36c78c1cd222262bb89d53c94dcb4d6b3e55d",
+      "upload": {
+        "wall_seconds": 4.3297446,
+        "throughput_mib_per_second": 2.309605051531215,
+        "heap_before_mib": 74.11111450195312,
+        "heap_peak_mib": 76.11111450195312,
+        "heap_after_mib": 50.0,
+        "heap_peak_delta_mib": 2.0,
+        "gc_count_delta": 1,
+        "gc_time_milliseconds_delta": 7,
+        "process_cpu_average_percent": 32.117945247855964
+      },
+      "download": {
+        "wall_seconds": 0.50363,
+        "throughput_mib_per_second": 19.85584655401783,
+        "heap_before_mib": 50.0,
+        "heap_peak_mib": 56.0,
+        "heap_after_mib": 56.0,
+        "heap_peak_delta_mib": 6.0,
+        "gc_count_delta": 0,
+        "gc_time_milliseconds_delta": 0,
+        "process_cpu_average_percent": 71.35694855350158
+      },
+      "delete_seconds": 0.0401793,
+      "exists_after_delete": false
+    },
+    {
+      "size_mib": 100,
+      "bytes": 104857600,
+      "status": "VERIFIED",
+      "sha256": "20492a4d0d84f8beb1767f6616229f85d44c2827b64bdbfb260ee12fa1109e0e",
+      "upload": {
+        "wall_seconds": 9.865208,
+        "throughput_mib_per_second": 10.13663371314624,
+        "heap_before_mib": 60.0,
+        "heap_peak_mib": 76.0,
+        "heap_after_mib": 76.0,
+        "heap_peak_delta_mib": 16.0,
+        "gc_count_delta": 0,
+        "gc_time_milliseconds_delta": 0,
+        "process_cpu_average_percent": 13.304331748504438
+      },
+      "download": {
+        "wall_seconds": 17.2180123,
+        "throughput_mib_per_second": 5.807871330188328,
+        "heap_before_mib": 78.0,
+        "heap_peak_mib": 112.0,
+        "heap_after_mib": 112.0,
+        "heap_peak_delta_mib": 34.0,
+        "gc_count_delta": 0,
+        "gc_time_milliseconds_delta": 0,
+        "process_cpu_average_percent": 10.799010754568922
+      },
+      "delete_seconds": 0.0392807,
+      "exists_after_delete": false
+    },
+    {
+      "size_mib": 500,
+      "bytes": 524288000,
+      "status": "VERIFIED",
+      "sha256": "a08a92258f621b55d08ad1e84c90c2ea6286fc6b6c9a4dfa7156afb16c190170",
+      "upload": {
+        "wall_seconds": 51.429067,
+        "throughput_mib_per_second": 9.722128538711386,
+        "heap_before_mib": 114.0,
+        "heap_peak_mib": 128.0,
+        "heap_after_mib": 101.55330657958984,
+        "heap_peak_delta_mib": 14.0,
+        "gc_count_delta": 1,
+        "gc_time_milliseconds_delta": 4,
+        "process_cpu_average_percent": 7.99037439275342
+      },
+      "download": {
+        "wall_seconds": 24.6610147,
+        "throughput_mib_per_second": 20.274915938475154,
+        "heap_before_mib": 101.55330657958984,
+        "heap_peak_mib": 117.55330657958984,
+        "heap_after_mib": 110.79464721679688,
+        "heap_peak_delta_mib": 16.0,
+        "gc_count_delta": 2,
+        "gc_time_milliseconds_delta": 7,
+        "process_cpu_average_percent": 18.500860793858575
+      },
+      "delete_seconds": 0.0390644,
+      "exists_after_delete": false
+    }
+  ],
+  "concurrent_upload": {
+    "status": "VERIFIED",
+    "concurrency": 4,
+    "object_size_mib": 10,
+    "successful_uploads": 4,
+    "integrity_verified_objects": 4,
+    "wall_seconds": 6.3441038,
+    "aggregate_throughput_mib_per_second": 6.305067076613721,
+    "individual_latency_seconds": [6.3433914, 0.9884172, 5.9697197, 5.9228234],
+    "heap_peak_delta_mib": 8.0,
+    "gc_count_delta": 0,
+    "capacity_boundary": "Functional concurrency 4 is verified, but this single run did not show throughput scaling and does not establish a safe concurrency limit."
+  },
+  "failure_behavior": {
+    "status": "VERIFIED",
+    "missing_object": {"result": "BOUNDED_NOT_FOUND", "seconds": 0.0431884},
+    "interrupted_upload": {"result": "BOUNDED_NO_OBJECT", "seconds": 1.2596275, "partial_object_visible": false},
+    "invalid_credentials": {"result": "BOUNDED_REJECTION", "seconds": 0.1493973}
+  },
+  "cleanup": {
+    "capacity_test": {
+      "tracked_objects": 8,
+      "delete_failures": 0,
+      "remaining_objects": 0
+    },
+    "phase16_video_results": {
+      "requested_objects": 2,
+      "objects_existed_before": 2,
+      "remaining_objects": 0
+    },
+    "all_known_test_objects_removed": true
+  },
+  "raw_evidence": {
+    "path": "target/phase16-oss-20260913185412/phase16-oss-raw-evidence.json",
+    "sha256": "CFAEFFF5BA72BAB15D7E0CEC624B0AA646F27C2E1C24D83D8AE66C1BA395B3C2"
+  },
+  "explicit_cleanup_evidence": {
+    "path": "target/phase16-oss-explicit-cleanup.json",
+    "sha256": "FFFA7F52AFD745948A50C69E042083E722DF65DA0B1A3E1498DEF7898F3E89DF"
+  },
+  "security_requirement": "Rotate the exposed long-lived credentials and use least-privilege RAM or short-lived STS before production.",
+  "not_verified": [
+    "100 and 500 MiB through the business HTTP upload endpoints, which default to a 50 MiB limit",
+    "multipart and resumable upload",
+    "aggregate capacity from multiple backend JVMs",
+    "real network partition, throttling, DNS failure, OSS 5xx and SDK retry recovery",
+    "same-region cloud-host bandwidth and long-duration throughput",
+    "OSS lifecycle, versioning, encryption, RAM policy, STS, audit and cross-region disaster recovery",
+    "object-storage soak"
+  ]
+}
