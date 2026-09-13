@@ -1,0 +1,152 @@
+{
+  "phase": "16.9",
+  "status": "VERIFIED_WITH_LIMITS",
+  "formal_run_id": "p16_20260913211423",
+  "application_git_sha": "e96383e5cfe4d8055c84f2683d393deb563c4203",
+  "protocol": {
+    "platform": "Windows local host",
+    "topology": "nginx -> two Spring Boot backends -> isolated MySQL and dedicated Redis; real local GPT-SoVITS and FunASR required for readiness",
+    "registered_users": 1000,
+    "active_users": 200,
+    "virtual_users": 100,
+    "stabilization_seconds": 60,
+    "warmup_seconds": 120,
+    "steady_seconds": 1800,
+    "collector_tail_seconds": 300,
+    "task_share_percent": 2,
+    "tts_interval_seconds": 300,
+    "worker_execution": "suspended with 24-hour poll interval",
+    "real_tts_max_in_flight": 1,
+    "real_asr_workload": false
+  },
+  "http": {
+    "l0_requests": 49983,
+    "rps": 27.7683333333,
+    "status_counts": {"200": 49981, "202": 2},
+    "error_rate": 0.0,
+    "p50_ms": 2.6286,
+    "p95_ms": 4.43928,
+    "p99_ms": 45.399328,
+    "endpoints": [
+      {"name": "login", "requests": 100, "p50_ms": 481.50895, "p95_ms": 494.321265, "p99_ms": 503.364489, "error_rate": 0.0, "accepted_slo": "MET"},
+      {"name": "voice_list", "requests": 22181, "p50_ms": 1.9291, "p95_ms": 2.884, "p99_ms": 40.7142, "error_rate": 0.0, "accepted_slo": "MET"},
+      {"name": "voice_search", "requests": 11087, "p50_ms": 2.9231, "p95_ms": 3.6842, "p99_ms": 42.55942, "error_rate": 0.0, "accepted_slo": "MET"},
+      {"name": "courseware_list", "requests": 16585, "p50_ms": 3.6514, "p95_ms": 4.6267, "p99_ms": 43.322484, "error_rate": 0.0, "accepted_slo": "MET"},
+      {"name": "task_create", "requests": 2, "p50_ms": 27.86735, "p95_ms": 43.876, "p99_ms": 45.2992, "error_rate": 0.0, "accepted_slo": "MET"},
+      {"name": "task_status", "requests": 28, "p50_ms": 2.5979, "p95_ms": 3.049795, "p99_ms": 4.340776, "error_rate": 0.0, "accepted_slo": "MET"}
+    ],
+    "legacy_k6_exit_code": 99,
+    "legacy_threshold_failure": "Only endpoint:login p95 < 300 ms failed; the accepted independent login p95 < 750 ms SLO passed."
+  },
+  "real_tts": {
+    "requests": 6,
+    "http_200": 6,
+    "wav_checks_passed": 6,
+    "error_rate": 0.0,
+    "p50_ms": 2707.89235,
+    "p95_ms": 3255.668375,
+    "p99_ms": 3269.441035,
+    "accepted_p95_p99_slo_ms": 30000,
+    "accepted_slo": "MET"
+  },
+  "resources": {
+    "samples": 443,
+    "scrape_failures": 0,
+    "host_cpu_p95_percent": 11.886697981,
+    "host_cpu_max_percent": 28.787706583,
+    "host_available_memory_min_mib": 557,
+    "two_backend_rss_max_mib": 1105.566,
+    "two_model_rss_max_mib": 2172.551,
+    "two_jvm_heap_max_mib": 385.749,
+    "gc_pause_seconds_delta": 0.253,
+    "gc_pause_count_delta": 101,
+    "jvm_live_threads_max": 232,
+    "tomcat_busy_max": 6,
+    "hikari_pending_max": 0,
+    "executor_queue_max": 0,
+    "task_rejected_delta": 0,
+    "redis_evicted_delta": 0,
+    "mysql_slow_queries_delta": 0,
+    "pending_tasks_max": 4,
+    "backend_process_exits": 0,
+    "model_process_missing_samples": 0
+  },
+  "trend": {
+    "first_5m": {
+      "host_cpu_average_percent": 7.898,
+      "available_memory_min_mib": 653,
+      "backend_rss_last_mib": 1054.078,
+      "model_rss_last_mib": 2105.703,
+      "jvm_heap_p95_mib": 361.143,
+      "jvm_heap_last_mib": 225.739,
+      "jvm_threads_last": 198,
+      "mysql_connections_last": 8,
+      "redis_keys_last": 354
+    },
+    "last_5m": {
+      "host_cpu_average_percent": 7.481,
+      "available_memory_min_mib": 643,
+      "backend_rss_last_mib": 1078.766,
+      "model_rss_last_mib": 2158.992,
+      "jvm_heap_p95_mib": 315.938,
+      "jvm_heap_last_mib": 208.595,
+      "jvm_threads_last": 230,
+      "mysql_connections_last": 6,
+      "redis_keys_last": 380
+    },
+    "recovery_tail_end": {
+      "available_memory_mib": 946,
+      "backend_rss_mib": 1082.629,
+      "model_rss_mib": 2159.137,
+      "jvm_heap_mib": 181.864,
+      "jvm_threads": 230,
+      "mysql_connections": 3,
+      "redis_keys": 100
+    },
+    "assessment": "No continuous heap, connection, Redis, queue, backend RSS, or model RSS growth was observed. JVM threads rose in bounded steps from 198 to 230 and plateaued, but did not return during the five-minute tail."
+  },
+  "nginx_upstream_requests": {
+    "backend_1": 26502,
+    "backend_2": 26878,
+    "other_or_retry_lines": 2,
+    "both_backends_received_requests": true
+  },
+  "evidence_integrity": {
+    "raw_l0_counter_matches_http_and_summary": true,
+    "raw_tts_counter_matches_http_and_summary": true,
+    "checks_rate": 1.0,
+    "dropped_iterations": 0,
+    "manifest_sha256": "9C067CC319E87E74BEE2DAD43EE02F6EFB8A3923EAD44DC5BD0CE91BF6AD6B21",
+    "k6_summary_sha256": "1860411360864D52A4E342CA66A4235C15310709255A702BCB0F42560C66AB86",
+    "resource_samples_sha256": "551EE011CC6356F6EF9444423130BBC79F6EADEF24FB142AECEAFE1AE26A8891",
+    "k6_raw_sha256": "92480A801EE9D7F51283419FDF34FDF11B664A75028C2540B1135BBAE5876D21",
+    "generated_summary_sha256": "2BD93025ECADD5A9D6452E9B9E2FB6A0858978C0FF2244E3EFC56DA8B6FBE6D0"
+  },
+  "cleanup": {
+    "isolated_schema_remaining": 0,
+    "dedicated_redis_stopped": true,
+    "nginx_and_test_backend_ports_closed": true,
+    "daily_mysql_3306_reachable": true,
+    "daily_redis_6379_reachable": true,
+    "daily_gpt_sovits_9880_reachable": true,
+    "daily_funasr_9977_reachable": true
+  },
+  "validation": {
+    "powershell_syntax": "PASS",
+    "k6_inspect": "PASS",
+    "phase13_summary_compatibility": "PASS",
+    "phase16_multi_summary_compatibility": "PASS",
+    "maven_tests": 150,
+    "maven_failures": 0,
+    "maven_errors": 0,
+    "maven_skipped": 12,
+    "maven_package": "PASS"
+  },
+  "boundaries": [
+    "This is one 30-minute local Windows run, not a 60-minute, repeated, Linux, cloud, or production soak.",
+    "Only six serial real TTS requests ran; concurrent TTS, real ASR, FFmpeg, video, and OSS data transfer were excluded.",
+    "Courseware tasks were enqueued and polled but not consumed because workers used a 24-hour poll interval.",
+    "JVM threads plateaued 32 above the first-five-minute value and need thread dumps plus a longer repeated soak before the risk can be closed.",
+    "The minimum host available memory was 557 MiB, so this host has little capacity headroom for additional heavy concurrency."
+  ]
+}

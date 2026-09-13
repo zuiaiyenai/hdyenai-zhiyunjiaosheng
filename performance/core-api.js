@@ -15,6 +15,8 @@ const password = required('LOAD_TEST_PASSWORD');
 const summaryPath = required('SUMMARY_PATH');
 const taskSharePercent = numberInRange(__ENV.TASK_SHARE_PERCENT || '20', 0, 100,
   'TASK_SHARE_PERCENT');
+const ttsIntervalSeconds = numberInRange(__ENV.TTS_INTERVAL_SECONDS || '0', 0, 3600,
+  'TTS_INTERVAL_SECONDS');
 const seed = hash(`${runId}:${__ENV.SEED || runId}`);
 
 const l0Requests = new Counter('fctts_l0_requests');
@@ -25,6 +27,9 @@ const taskAccepted = new Counter('fctts_task_accepted');
 const taskDuplicate = new Counter('fctts_task_duplicate');
 const taskRejected = new Counter('fctts_task_rejected');
 const taskTerminal = new Counter('fctts_task_terminal');
+const ttsRequests = new Counter('fctts_tts_requests');
+const ttsDuration = new Trend('fctts_tts_duration', true);
+const ttsErrors = new Rate('fctts_tts_errors');
 
 const endpoints = [
   'login',
@@ -48,6 +53,11 @@ for (const endpoint of endpoints) {
   ];
   thresholds[`fctts_l0_errors{endpoint:${endpoint}}`] = ['rate<0.01'];
   thresholds[`fctts_l0_requests{endpoint:${endpoint}}`] = ['count>0'];
+}
+if (ttsIntervalSeconds > 0) {
+  thresholds.fctts_tts_duration = ['p(95)<30000', 'p(99)<30000'];
+  thresholds.fctts_tts_errors = ['rate<0.01'];
+  thresholds.fctts_tts_requests = ['count>0'];
 }
 
 export const options = {
@@ -132,6 +142,8 @@ export function journey() {
     }
   }
 
+  maybeSynthesize(state);
+
   sleep(randomBetween(state, 3, 8));
 }
 
@@ -145,10 +157,50 @@ function initializeVu() {
     token: null,
     taskId: null,
     taskSubmitted: false,
+    lastTtsAtSeconds: 0,
     initialDelayDone: false,
     submitTask: selectedForPercent(userIndex, taskSharePercent),
     randomState: (seed ^ (userIndex * 2654435761)) >>> 0,
   };
+}
+
+function maybeSynthesize(vuState) {
+  if (ttsIntervalSeconds <= 0 || vuState.userIndex !== 1) {
+    return;
+  }
+  const nowSeconds = Date.now() / 1000;
+  if (vuState.lastTtsAtSeconds > 0 &&
+      nowSeconds - vuState.lastTtsAtSeconds < ttsIntervalSeconds) {
+    return;
+  }
+  vuState.lastTtsAtSeconds = nowSeconds;
+  const tags = { lane: 'TTS', endpoint: 'tts', phase: exec.scenario.name };
+  const response = http.post(`${baseUrl}/voice/synthesize`, JSON.stringify({
+    text: '欢迎来到课堂',
+    voice: 'longxiao',
+  }), {
+    headers: {
+      Accept: 'audio/wav',
+      Authorization: `Bearer ${vuState.token}`,
+      'Content-Type': 'application/json',
+    },
+    tags,
+    timeout: '30s',
+    responseType: 'binary',
+  });
+  const bytes = response.body ? new Uint8Array(response.body) : new Uint8Array(0);
+  const wav = bytes.length >= 44 && bytes[0] === 82 && bytes[1] === 73 &&
+    bytes[2] === 70 && bytes[3] === 70;
+  const ok = response.status === 200 && wav;
+  check(response, {
+    'tts HTTP 200': () => response.status === 200,
+    'tts WAV payload': () => wav,
+  }, tags);
+  if (exec.scenario.name === 'steady') {
+    ttsRequests.add(1);
+    ttsDuration.add(response.timings.duration);
+    ttsErrors.add(!ok);
+  }
 }
 
 function selectedForPercent(index, percent) {
@@ -238,6 +290,7 @@ export function handleSummary(data) {
     steadyDurationSeconds,
     baseUrl,
     taskSharePercent,
+    ttsIntervalSeconds,
     lane: 'L0_CORE_API',
   };
   return {

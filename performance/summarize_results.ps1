@@ -9,8 +9,8 @@ if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Missing run manifest: 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $phaseNumber = if ($manifest.PSObject.Properties['phase']) { [int]$manifest.phase } else { 11 }
 if ($phaseNumber -notin @(11, 13, 16)) { throw "Unsupported performance phase: $phaseNumber" }
-if ($phaseNumber -eq 16 -and $manifest.lane -ne 'MULTI_INSTANCE_MIXED') {
-    throw "Phase 16 summary currently supports only the multi-instance mixed lane"
+if ($phaseNumber -eq 16 -and $manifest.lane -notin @('MULTI_INSTANCE_MIXED', 'SOAK_MIXED_WITH_REAL_TTS')) {
+    throw "Unsupported Phase 16 lane: $($manifest.lane)"
 }
 $phaseLabel = "phase$phaseNumber"
 $pendingTasksMetric = "${phaseLabel}_tasks_pending"
@@ -53,7 +53,7 @@ function Counter-Delta($Samples, [scriptblock]$Selector) {
     return [double]$values[-1] - [double]$values[0]
 }
 
-function Read-StatusCounts([string]$RawPath) {
+function Read-StatusCounts([string]$RawPath, [string]$Lane = 'L0') {
     $counts = @{}
     if (-not (Test-Path -LiteralPath $RawPath)) { return $counts }
     $reader = [System.IO.StreamReader]::new($RawPath)
@@ -63,7 +63,7 @@ function Read-StatusCounts([string]$RawPath) {
             if ($line -notmatch '"metric":"http_reqs"') { continue }
             try { $point = $line | ConvertFrom-Json } catch { continue }
             if ($point.type -ne 'Point' -or $point.data.tags.scenario -ne 'steady' -or
-                    $point.data.tags.lane -ne 'L0') { continue }
+                    $point.data.tags.lane -ne $Lane) { continue }
             $status = [string]$point.data.tags.status
             if (-not $counts.ContainsKey($status)) { $counts[$status] = 0 }
             $counts[$status]++
@@ -86,6 +86,14 @@ foreach ($run in $manifest.runs) {
     $totalRequests = Value (Metric $summary 'fctts_l0_requests') 'count'
     $duration = Metric $summary 'fctts_l0_duration'
     $errors = Metric $summary 'fctts_l0_errors'
+    $ttsRequestMetric = Metric $summary 'fctts_tts_requests'
+    $ttsDurationMetric = Metric $summary 'fctts_tts_duration'
+    $ttsErrorMetric = Metric $summary 'fctts_tts_errors'
+    $ttsRequestCount = Value $ttsRequestMetric 'count'
+    $ttsErrorRate = Value $ttsErrorMetric 'rate'
+    $ttsSloMet = $manifest.lane -eq 'SOAK_MIXED_WITH_REAL_TTS' -and
+        $ttsRequestCount -gt 0 -and (Value $ttsDurationMetric 'p(95)') -lt 30000 -and
+        (Value $ttsDurationMetric 'p(99)') -lt 30000 -and $ttsErrorRate -lt 0.01
     $endpoints = @()
     foreach ($endpoint in @('login','voice_list','voice_search','courseware_list','task_create','task_status')) {
         $endpointDuration = Metric $summary "fctts_l0_duration{endpoint:$endpoint}"
@@ -119,6 +127,9 @@ foreach ($run in $manifest.runs) {
     }
     $processWorkingSets = @()
     $processCpu = @()
+    $modelWorkingSets = @()
+    $modelThreads = @()
+    $modelProcessMissingSamples = 0
     foreach ($sample in $samples) {
         $workingSet = 0.0
         $hasWorkingSet = $false
@@ -132,6 +143,28 @@ foreach ($run in $manifest.runs) {
             }
         }
         if ($hasWorkingSet) { $processWorkingSets += $workingSet }
+        $modelWorkingSet = 0.0
+        $hasModelWorkingSet = $false
+        $modelThreadCount = 0.0
+        $hasModelThreadCount = $false
+        if ($sample.PSObject.Properties['model_processes']) {
+            foreach ($processProperty in $sample.model_processes.PSObject.Properties) {
+                if (-not $processProperty.Value.alive) {
+                    $modelProcessMissingSamples++
+                    continue
+                }
+                if ($null -ne $processProperty.Value.working_set_bytes) {
+                    $modelWorkingSet += [double]$processProperty.Value.working_set_bytes
+                    $hasModelWorkingSet = $true
+                }
+                if ($null -ne $processProperty.Value.threads) {
+                    $modelThreadCount += [double]$processProperty.Value.threads
+                    $hasModelThreadCount = $true
+                }
+            }
+        }
+        if ($hasModelWorkingSet) { $modelWorkingSets += $modelWorkingSet }
+        if ($hasModelThreadCount) { $modelThreads += $modelThreadCount }
     }
     $redisLatencies = @($samples | ForEach-Object { $_.redis.ping_latency_ms } |
         Where-Object { $null -ne $_ } | ForEach-Object { [double]$_ })
@@ -149,6 +182,17 @@ foreach ($run in $manifest.runs) {
         error_rate = Value $errors 'rate'
         http_status_counts = Read-StatusCounts (Join-Path $caseDirectory 'k6-raw.json')
         endpoints = $endpoints
+        tts = if ($manifest.lane -eq 'SOAK_MIXED_WITH_REAL_TTS') {
+            [ordered]@{
+                requests = $ttsRequestCount
+                p50_ms = Value $ttsDurationMetric 'med'
+                p95_ms = Value $ttsDurationMetric 'p(95)'
+                p99_ms = Value $ttsDurationMetric 'p(99)'
+                error_rate = $ttsErrorRate
+                http_status_counts = Read-StatusCounts (Join-Path $caseDirectory 'k6-raw.json') 'TTS'
+                accepted_slo_met = $ttsSloMet
+            }
+        } else { $null }
         accepted_slo = [ordered]@{
             ordinary_api = [ordered]@{
                 p50_ms_lt = 100
@@ -162,7 +206,10 @@ foreach ($run in $manifest.runs) {
                 error_rate_lt = 0.01
                 met = $loginSloMet
             }
-            note = 'k6 retains the original 300 ms threshold for every endpoint; accepted login SLO is evaluated separately here'
+            tts = if ($manifest.lane -eq 'SOAK_MIXED_WITH_REAL_TTS') {
+                [ordered]@{ p95_ms_lt = 30000; p99_ms_lt = 30000; error_rate_lt = 0.01; met = $ttsSloMet }
+            } else { $null }
+            note = 'k6 retains the original 300 ms L0 threshold; login and real TTS use their separately accepted SLOs'
         }
         resources = [ordered]@{
             samples = $samples.Count
@@ -172,6 +219,9 @@ foreach ($run in $manifest.runs) {
             host_available_memory_min_mb = Min-Number $samples { $_.host.available_memory_mb }
             backend_cpu_max_percent = if ($processCpu.Count -gt 0) { [double](($processCpu | Measure-Object -Maximum).Maximum) } else { $null }
             backend_working_set_max_bytes = if ($processWorkingSets.Count -gt 0) { [double](($processWorkingSets | Measure-Object -Maximum).Maximum) } else { $null }
+            model_working_set_max_bytes = if ($modelWorkingSets.Count -gt 0) { [double](($modelWorkingSets | Measure-Object -Maximum).Maximum) } else { $null }
+            model_threads_max = if ($modelThreads.Count -gt 0) { [double](($modelThreads | Measure-Object -Maximum).Maximum) } else { $null }
+            model_process_missing_samples = $modelProcessMissingSamples
             jvm_heap_max_bytes = Max-Number $samples { $_.prometheus.jvm_heap_used_bytes }
             gc_pause_seconds = Counter-Delta $samples { $_.prometheus.jvm_gc_pause_seconds_sum }
             gc_pause_count = Counter-Delta $samples { $_.prometheus.jvm_gc_pause_seconds_count }

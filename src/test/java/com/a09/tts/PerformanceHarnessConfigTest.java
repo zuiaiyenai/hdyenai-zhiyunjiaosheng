@@ -25,7 +25,9 @@ class PerformanceHarnessConfigTest {
         assertTrue(script.contains("stateScenario !== exec.scenario.name"));
         assertTrue(script.contains("selectedForPercent(userIndex, taskSharePercent)"));
         assertTrue(script.contains("handleSummary"));
-        assertFalse(script.contains("/voice/synthesize"));
+        assertTrue(script.contains("TTS_INTERVAL_SECONDS || '0'"));
+        assertTrue(script.contains("if (ttsIntervalSeconds <= 0"));
+        assertTrue(script.contains("/voice/synthesize"));
         assertFalse(script.contains("/voice/stream"));
     }
 

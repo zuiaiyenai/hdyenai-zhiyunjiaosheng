@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("phase11", "phase13", "phase16-login", "phase16-multi")]
+    [ValidateSet("phase11", "phase13", "phase16-login", "phase16-multi", "phase16-soak")]
     [string]$RunPhase = "phase11",
     [int[]]$UserLevels = @(10, 50, 100, 200),
     [int]$Repetitions = 3,
@@ -22,7 +22,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
 $phaseNumber = if ($RunPhase -eq "phase13") { 13 }
-    elseif ($RunPhase -in @("phase16-login", "phase16-multi")) { 16 }
+    elseif ($RunPhase -in @("phase16-login", "phase16-multi", "phase16-soak")) { 16 }
     else { 11 }
 $runId = "p${phaseNumber}_$timestamp"
 $schema = "fctts_phase${phaseNumber}_$timestamp"
@@ -41,6 +41,7 @@ $priorRedisPassword = $env:REDIS_PASSWORD
 $priorMySqlPassword = $env:MYSQL_PWD
 $priorDbUrl = $env:DB_URL
 $priorSpringDatasourceUrl = $env:SPRING_DATASOURCE_URL
+$priorTtsIntervalSeconds = $env:TTS_INTERVAL_SECONDS
 $nginxAccessLog = Join-Path $projectRoot 'deploy\nginx\logs\access.log'
 $nginxAccessLogStartLine = if (Test-Path -LiteralPath $nginxAccessLog) {
     @(Get-Content -LiteralPath $nginxAccessLog).Count
@@ -59,6 +60,11 @@ if ($RunPhase -eq "phase13" -and
         ($UserLevels.Count -ne 1 -or $UserLevels[0] -ne 150 -or $Repetitions -ne 1 -or
          $WarmupDuration -ne "2m" -or $SteadyDuration -notin @("30m", "60m"))) {
     throw "Phase 13 requires 150 VUs, one repetition, 2m warmup, and 30m or 60m steady duration"
+}
+if ($RunPhase -eq "phase16-soak" -and
+        ($UserLevels.Count -ne 1 -or $UserLevels[0] -ne 100 -or $Repetitions -ne 1 -or
+         $WarmupDuration -ne "2m" -or $SteadyDuration -notin @("30m", "60m"))) {
+    throw "Phase 16 soak requires 100 VUs, one repetition, 2m warmup, and 30m or 60m steady duration"
 }
 if ($Repetitions -lt 1) { throw "Repetitions must be positive" }
 if ($CollectorTailSeconds -lt 10) { throw "CollectorTailSeconds must be at least 10" }
@@ -120,6 +126,13 @@ function Test-TcpPort([int]$Port) {
     }
 }
 
+function Get-ListeningProcessId([int]$Port) {
+    $connection = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $connection) { throw "No listening process found on port $Port" }
+    return [int]$connection.OwningProcess
+}
+
 function Wait-Redis([int]$TimeoutSeconds = 30) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -151,13 +164,14 @@ function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name,
           else { '--app.tasks.poll-interval=24h' }),
         '--app.tasks.global-queue-limit=200',
         '--app.tasks.per-user-concurrency=2',
-        $(if ($RunPhase -eq 'phase16-multi') { '--app.observability.external-services-required=true' }
+        $(if ($RunPhase -in @('phase16-multi', 'phase16-soak')) { '--app.observability.external-services-required=true' }
           else { '--app.observability.external-services-required=false' }),
         $(if ($ActiveWorkers) { '--app.cleanup.retry-delay=500ms' }
           else { '--app.cleanup.retry-delay=5m' }),
         '--app.cleanup.claim-timeout=5s',
         "--app.observability.environment=$RunPhase-$Name"
     )
+    if ($RunPhase -eq 'phase16-soak') { $arguments += '--tts.api.timeout=30s' }
     $process = Start-Process -FilePath $javaExe -ArgumentList $arguments -PassThru `
         -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     return $process
@@ -204,6 +218,13 @@ try {
         if (Test-TcpPort $port) {
             throw "Port $port is already in use"
         }
+    }
+    $modelProcessIds = ''
+    if ($RunPhase -eq 'phase16-soak') {
+        if (-not (Test-TcpPort 9880) -or -not (Test-TcpPort 9977)) {
+            throw 'Phase 16 soak requires real GPT-SoVITS on 9880 and FunASR on 9977'
+        }
+        $modelProcessIds = "$(Get-ListeningProcessId 9880),$(Get-ListeningProcessId 9977)"
     }
     $redisConfig = @(
         'bind 127.0.0.1',
@@ -269,15 +290,19 @@ try {
         topology = 'nginx -> backend-1/backend-2 -> shared MySQL/Redis'
         lane = if ($RunPhase -eq 'phase16-login') { 'LOGIN_PROFILE' }
             elseif ($RunPhase -eq 'phase16-multi') { 'MULTI_INSTANCE_MIXED' }
+            elseif ($RunPhase -eq 'phase16-soak') { 'SOAK_MIXED_WITH_REAL_TTS' }
             else { 'L0_CORE_API' }
         media_execution = if ($RunPhase -eq 'phase16-login') {
             'excluded; sustained login-only profiling with DB workers polling every 24h'
         } elseif ($RunPhase -eq 'phase16-multi') {
             'load lane enqueues/polls a small task share with workers suspended; functional lane restarts two 250ms workers for one real ASR task'
+        } elseif ($RunPhase -eq 'phase16-soak') {
+            'workers suspended; one designated VU calls real GPT-SoVITS every 300 seconds'
         } else {
             "excluded; DB workers poll every 24h during $RunPhase L0 mixed workload"
         }
         data_baseline = @{ registered_users = 1000; active_users = 200; projects_per_active = 10; historical_tasks_per_active = 50; public_voices = 200 }
+        model_process_ids = $modelProcessIds
         runs = @()
     }
     [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
@@ -303,6 +328,7 @@ try {
                 '-RedisDatabase', $RedisDatabase,
                 '-RedisPort', $RedisPort
             )
+            if ($modelProcessIds) { $collectorArgs += @('-ModelProcessIds', $modelProcessIds) }
             $collectorStdout = Join-Path $caseDirectory 'collector.stdout.log'
             $collectorStderr = Join-Path $caseDirectory 'collector.stderr.log'
             $collector = Start-Process -FilePath 'powershell.exe' -ArgumentList $collectorArgs `
@@ -319,6 +345,7 @@ try {
             $env:USER_PREFIX = $userPrefix
             $env:SUMMARY_PATH = $summaryPath
             $env:TASK_SHARE_PERCENT = "$TaskSharePercent"
+            $env:TTS_INTERVAL_SECONDS = if ($RunPhase -eq 'phase16-soak') { '300' } else { '0' }
             $k6Script = if ($RunPhase -eq 'phase16-login') { 'login-profile.js' } else { 'core-api.js' }
             & $K6Exe run --quiet --out "json=$rawPath" (Join-Path $PSScriptRoot $k6Script)
             $k6ExitCode = $LASTEXITCODE
@@ -426,4 +453,5 @@ try {
     $env:MYSQL_PWD = $priorMySqlPassword
     $env:DB_URL = $priorDbUrl
     $env:SPRING_DATASOURCE_URL = $priorSpringDatasourceUrl
+    $env:TTS_INTERVAL_SECONDS = $priorTtsIntervalSeconds
 }

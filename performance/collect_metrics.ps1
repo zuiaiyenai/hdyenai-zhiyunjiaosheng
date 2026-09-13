@@ -9,6 +9,7 @@ param(
     [int]$Backend1ProcessId,
     [Parameter(Mandatory = $true)]
     [int]$Backend2ProcessId,
+    [string]$ModelProcessIds = '',
     [int]$IntervalSeconds = 5,
     [int]$RedisDatabase = 14,
     [int]$RedisPort = 6380,
@@ -40,6 +41,8 @@ $completePath = Join-Path $OutputDirectory "collector.complete"
 $writer = [System.IO.StreamWriter]::new($samplesPath, $false, [System.Text.UTF8Encoding]::new($false))
 $logicalProcessors = [Environment]::ProcessorCount
 $backendProcessIds = @($Backend1ProcessId, $Backend2ProcessId)
+$modelProcessIdValues = @($ModelProcessIds -split ',' | Where-Object { $_ } |
+    ForEach-Object { [int]$_ } | Select-Object -Unique)
 $previousCpu = @{}
 $previousAt = Get-Date
 $phaseLabel = if ($Schema -match '^fctts_phase13_') { 'phase13' }
@@ -175,6 +178,28 @@ try {
                 threads = [double]$process.Threads.Count
             }
         }
+        $modelProcesses = @{}
+        foreach ($processId in $modelProcessIdValues) {
+            $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+            if (-not $process) {
+                $modelProcesses["$processId"] = @{ alive = $false }
+                continue
+            }
+            $cpuSeconds = $process.TotalProcessorTime.TotalSeconds
+            $cpuPercent = $null
+            if ($previousCpu.ContainsKey($processId)) {
+                $cpuPercent = [Math]::Max(0, (($cpuSeconds - $previousCpu[$processId]) / $elapsed / $logicalProcessors) * 100)
+            }
+            $previousCpu[$processId] = $cpuSeconds
+            $modelProcesses["$processId"] = @{
+                alive = $true
+                cpu_percent = $cpuPercent
+                working_set_bytes = [double]$process.WorkingSet64
+                private_bytes = [double]$process.PrivateMemorySize64
+                handles = [double]$process.HandleCount
+                threads = [double]$process.Threads.Count
+            }
+        }
         $previousAt = $now
 
         $hostCpu = ((Get-Counter '\Processor(_Total)\% Processor Time' -MaxSamples 1).CounterSamples |
@@ -212,6 +237,7 @@ try {
             sample = $sampleNumber
             host = @{ cpu_percent = [double]$hostCpu; available_memory_mb = [double]$availableMemoryMb }
             processes = $processes
+            model_processes = $modelProcesses
             prometheus = $prometheus
             mysql = $mysql
             redis = $redis
