@@ -1,0 +1,69 @@
+{
+  "phase": 12,
+  "executed_at": "2026-09-13",
+  "timezone": "Asia/Shanghai",
+  "host": {
+    "cpu": "AMD Ryzen 9 7945HX",
+    "logical_processors": 32,
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "gpu_memory_mib": 8188,
+    "nvidia_driver": "566.26",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "ffmpeg": "2025-03-03-git-d21ed2298e"
+  },
+  "protocol": {
+    "concurrency_levels": [1, 2, 4, 8],
+    "waves": 3,
+    "minimum_jobs_per_level": 6,
+    "sample_interval_seconds": 1,
+    "gpt_sovits_scope": "direct loopback POST /tts, fixed Chinese text, non-streaming WAV",
+    "ffmpeg_scope": "direct 30-second audio replacement encode matching VideoVoiceSwapServiceImpl",
+    "excluded": ["Spring", "Tomcat", "MySQL", "Redis", "FunASR", "OSS", "full video voice swap"]
+  },
+  "gpt_sovits": {
+    "warmup_seconds": 16.1829172,
+    "total_jobs": 48,
+    "total_failures": 0,
+    "safe_concurrency": 1,
+    "reason": "Higher concurrency did not improve throughput and increased p95 nearly linearly; concurrency 8 reduced available host memory to 364 MiB.",
+    "levels": [
+      {"concurrency": 1, "jobs": 6, "throughput_jobs_per_second": 0.1193167206, "p50_seconds": 8.7133545, "p95_seconds": 9.641596175, "p99_seconds": 9.864805875, "failure_rate": 0, "cpu_p95_percent": 20.275330843, "cpu_peak_percent": 23.352247927, "available_memory_min_mib": 2820.40234375, "gpu_p95_percent": 39, "gpu_peak_percent": 99, "gpu_memory_peak_mib": 3120},
+      {"concurrency": 2, "jobs": 6, "throughput_jobs_per_second": 0.1123724092, "p50_seconds": 17.26288915, "p95_seconds": 19.403601625, "p99_seconds": 19.734449845, "failure_rate": 0, "cpu_p95_percent": 28.039909556, "cpu_peak_percent": 29.717180245, "available_memory_min_mib": 2699.94140625, "gpu_p95_percent": 40.6, "gpu_peak_percent": 42, "gpu_memory_peak_mib": 3258},
+      {"concurrency": 4, "jobs": 12, "throughput_jobs_per_second": 0.1058166424, "p50_seconds": 35.69050545, "p95_seconds": 41.045525975, "p99_seconds": 41.143353595, "failure_rate": 0, "cpu_p95_percent": 29.217408636, "cpu_peak_percent": 41.551792044, "available_memory_min_mib": 1346.14453125, "gpu_p95_percent": 45, "gpu_peak_percent": 74, "gpu_memory_peak_mib": 3409},
+      {"concurrency": 8, "jobs": 24, "throughput_jobs_per_second": 0.1094291699, "p50_seconds": 70.46277695, "p95_seconds": 85.80490203, "p99_seconds": 86.185956243, "failure_rate": 0, "cpu_p95_percent": 62.419507576, "cpu_peak_percent": 91.853932584, "available_memory_min_mib": 364.14453125, "gpu_p95_percent": 42, "gpu_peak_percent": 78, "gpu_memory_peak_mib": 3236}
+    ],
+    "raw_evidence_sha256": "736DFDE4F52BAB9C1787EA5D78C0A4029D8CA535FDC0BEDB6AD86A2FCCF7F7F3"
+  },
+  "ffmpeg": {
+    "input_duration_seconds": 30,
+    "input_sha256": "415C8F289FD680F2512534E1EBC0393A218DE14A52C2383109FD88DAAABB368C",
+    "warmup_seconds": 1.2573461,
+    "total_jobs": 48,
+    "total_failures": 0,
+    "safe_host_concurrency": 2,
+    "recommended_per_instance_concurrency_for_two_instances_on_one_host": 1,
+    "reason": "Concurrency 4 saturated CPU for only 5.01% more throughput than concurrency 2.",
+    "levels": [
+      {"concurrency": 1, "jobs": 6, "throughput_jobs_per_second": 0.8021415254, "p50_seconds": 1.21878935, "p95_seconds": 1.35695725, "p99_seconds": 1.39223785, "failure_rate": 0, "cpu_p95_percent": 52.044622748, "cpu_peak_percent": 55.034722222, "available_memory_min_mib": 3772.4765625},
+      {"concurrency": 2, "jobs": 6, "throughput_jobs_per_second": 1.2428094154, "p50_seconds": 1.59379805, "p95_seconds": 1.710303475, "p99_seconds": 1.714361335, "failure_rate": 0, "cpu_p95_percent": 88.606825093, "cpu_peak_percent": 90.497737557, "available_memory_min_mib": 3483.18359375},
+      {"concurrency": 4, "jobs": 12, "throughput_jobs_per_second": 1.3050952343, "p50_seconds": 3.09216285, "p95_seconds": 3.15340997, "p99_seconds": 3.164347754, "failure_rate": 0, "cpu_p95_percent": 100, "cpu_peak_percent": 100, "available_memory_min_mib": 2143.44140625},
+      {"concurrency": 8, "jobs": 24, "throughput_jobs_per_second": 1.5230917946, "p50_seconds": 4.99739905, "p95_seconds": 5.827995585, "p99_seconds": 5.976312122, "failure_rate": 0, "cpu_p95_percent": 100, "cpu_peak_percent": 100, "available_memory_min_mib": 1006.59765625}
+    ],
+    "raw_evidence_sha256": "50C181DC7EE4507CDCCC5F412DA06B4727B8A0B9022EBCE5683F95860AF4725E"
+  },
+  "deployment_boundary": {
+    "tts": "Global concurrency 1 across shared GPT-SoVITS is required; current semaphore is per JVM, so multi-instance enforcement remains NOT VERIFIED.",
+    "ffmpeg": "Keep FFMPEG_MAX_CONCURRENT=1 per backend for two backends on this host, yielding measured host concurrency 2.",
+    "full_video_voice_swap": "NOT RUN"
+  },
+  "validation": {
+    "aggregate_matches_raw": true,
+    "python_compile": "PASS",
+    "loopback_guard": "PASS",
+    "maven_tests": 136,
+    "maven_failures": 0,
+    "maven_errors": 0,
+    "maven_skipped": 8,
+    "gpt_sovits_listener_after_run": "CLOSED"
+  }
+}

@@ -63,3 +63,23 @@ k6 的 closed-model scenario、request tags、thresholds、custom metrics 和 `h
 - <https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/>
 - <https://grafana.com/docs/k6/latest/using-k6/scenarios/advanced-examples/>
 - <https://grafana.com/docs/k6/latest/results-output/end-of-test/custom-summary/>
+
+## Phase 12 重任务压测
+
+`heavy_media_benchmark.py` 将 GPT-SoVITS 与 FFmpeg 分开测试，固定使用 1/2/4/8 并发。GPT-SoVITS 只允许回环地址，避免误把脚本指向外部或生产服务；原始结果只写入 `target/phase12-live-*`。
+
+建议先启动本机 GPT-SoVITS，再单独执行：
+
+```powershell
+& <python.exe> performance\heavy_media_benchmark.py `
+  --mode gpt `
+  --gpt-ref-audio <参考音频绝对路径>
+```
+
+关闭 GPT-SoVITS 后再执行纯 FFmpeg 测试，避免已加载模型污染 FFmpeg 的 RAM 基线：
+
+```powershell
+& <python.exe> performance\heavy_media_benchmark.py --mode ffmpeg
+```
+
+正式协议每档至少 3 个连续并发波次且不少于 6 个任务，并使用 30 秒输入测 FFmpeg。不要缩短后仍称为 Phase 12 容量证明。结果范围和本机结论见 `docs/performance/PHASE12_HEAVY_TASKS.md`。

@@ -31,9 +31,9 @@ Phase 6 为 TTS、ASR、FFmpeg 和课件任务增加了可配置的进程内 bul
 | 环境变量 | Spring 配置 | 默认值 | 证据状态 |
 | --- | --- | ---: | --- |
 | `RESOURCE_ACQUIRE_TIMEOUT` | `app.resources.acquire-timeout` | `50ms` | 仅为快速失败起点，未做容量实测。 |
-| `TTS_MAX_CONCURRENT` | `app.resources.tts.max-concurrent` | `1` | 未在真实 GPU 上校准。 |
+| `TTS_MAX_CONCURRENT` | `app.resources.tts.max-concurrent` | `1` | Phase 12 本机 GPT-SoVITS 实测安全并发为 1；多实例共享 GPU 的全局准入仍未解决。 |
 | `ASR_MAX_CONCURRENT` | `app.resources.asr.max-concurrent` | `1` | 未在真实 FunASR 负载下校准。 |
-| `FFMPEG_MAX_CONCURRENT` | `app.resources.ffmpeg.max-concurrent` | `1` | 未按本机 CPU/RAM 实测校准。 |
+| `FFMPEG_MAX_CONCURRENT` | `app.resources.ffmpeg.max-concurrent` | `1` | Phase 12 本机整机安全并发为 2；双实例同主机保持每实例 1。 |
 | `COURSEWARE_MAX_CONCURRENT` | `app.resources.courseware.max-concurrent` | `1` | 未按 Moonshot quota/延迟实测校准。 |
 
 所有最大并发必须大于 0，等待时间不得为负。Phase 12 必须按 1/2/4/8 分级测量吞吐、延迟、失败率、CPU、RAM 和 GPU（可用时），再反推生产值；不能因为配置可调就声称已经支持对应并发。
@@ -58,7 +58,7 @@ Phase 6 为 TTS、ASR、FFmpeg 和课件任务增加了可配置的进程内 bul
 
 ## 6. 已知边界
 
-1. 当前 Semaphore 是单实例范围。如果两个 backend 共享同一 GPU/ASR 服务，总并发上限等于各实例配置之和；生产部署必须按共享资源预算拆分，或在 Phase 10/12 后引入真正的跨实例 admission control。
+1. 当前 Semaphore 是单实例范围。Phase 12 已证实本机 GPT-SoVITS 安全并发为 1，但两个 backend 即使各配置 `TTS_MAX_CONCURRENT=1`，共享服务仍可能收到 2 个并发请求；生产部署必须按共享资源预算拆分，或引入真正的跨实例 admission control。FFmpeg 在双实例同主机时各保留 1，整机聚合为实测安全值 2。
 2. 所有 DB worker 仍共享固定 worker pool。资源饱和任务会快速 defer，避免长期占住线程，但热门任务持续排在前面时仍可能形成短时 head-of-line；Phase 9 的全局/每用户 pending 上限和真实队列压测仍未完成。
 3. 复合任务一次性持有其完整资源集合，因此某些资源会在任务的顺序阶段暂时空闲。这是避免死锁的保守选择；只有压测证明利用率成为瓶颈后，才应拆成阶段化 task，而不是先增加复杂度。
 4. 已有 `app.tasks.per-user-concurrency=2` 是 MySQL-backed、跨实例共享的每用户 PENDING/RUNNING 总活动任务上限。尚未实现独立的 `video: 1 running per user` 配额；它属于后续 quota/backpressure 工作，当前不得声称已完成。
@@ -74,4 +74,4 @@ Phase 6 为 TTS、ASR、FFmpeg 和课件任务增加了可配置的进程内 bul
 - 完整 Java 回归：116 tests，0 failures，0 errors，6 skipped；跳过项包含必须显式启用的真实外部服务和隔离 MySQL 集成测试，后者已按上一项单独运行通过。
 - 前端 Vite 生产构建通过；`git diff --check` 通过。
 
-以上结果仍只证明实现正确性和 MySQL 5.7 兼容性。真实 GPT-SoVITS/FunASR/FFmpeg 并发、多个 backend 的聚合资源预算、30–60 分钟 soak 和故障恢复均为 `NOT VERIFIED`。
+以上实现验证仍只证明正确性和 MySQL 5.7 兼容性。Phase 12 已另行实测本机 GPT-SoVITS 与纯 FFmpeg 的 1/2/4/8 并发并写入 `docs/performance/PHASE12_HEAVY_TASKS.md`；FunASR、完整视频换声、跨 backend 的全局 TTS 准入、30–60 分钟 soak 和故障恢复仍为 `NOT VERIFIED`。
