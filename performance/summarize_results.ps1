@@ -8,7 +8,10 @@ $manifestPath = Join-Path $ResultsDirectory 'run-manifest.json'
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Missing run manifest: $manifestPath" }
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $phaseNumber = if ($manifest.PSObject.Properties['phase']) { [int]$manifest.phase } else { 11 }
-if ($phaseNumber -notin @(11, 13)) { throw "Unsupported performance phase: $phaseNumber" }
+if ($phaseNumber -notin @(11, 13, 16)) { throw "Unsupported performance phase: $phaseNumber" }
+if ($phaseNumber -eq 16 -and $manifest.lane -ne 'MULTI_INSTANCE_MIXED') {
+    throw "Phase 16 summary currently supports only the multi-instance mixed lane"
+}
 $phaseLabel = "phase$phaseNumber"
 $pendingTasksMetric = "${phaseLabel}_tasks_pending"
 
@@ -99,6 +102,14 @@ foreach ($run in $manifest.runs) {
             error_rate = Value $endpointErrors 'rate'
         }
     }
+    $ordinaryEndpoints = @($endpoints | Where-Object { $_.endpoint -ne 'login' })
+    $loginEndpoint = @($endpoints | Where-Object { $_.endpoint -eq 'login' })[0]
+    $ordinarySloMet = @($ordinaryEndpoints | Where-Object {
+        $_.requests -le 0 -or $_.p50_ms -ge 100 -or $_.p95_ms -ge 300 -or
+        $_.p99_ms -ge 800 -or $_.error_rate -ge 0.01
+    }).Count -eq 0
+    $loginSloMet = $loginEndpoint.requests -gt 0 -and
+        $loginEndpoint.p95_ms -lt 750 -and $loginEndpoint.error_rate -lt 0.01
     $thresholdsPassed = $true
     foreach ($metricProperty in $summary.metrics.PSObject.Properties) {
         if (-not $metricProperty.Value.thresholds) { continue }
@@ -138,6 +149,21 @@ foreach ($run in $manifest.runs) {
         error_rate = Value $errors 'rate'
         http_status_counts = Read-StatusCounts (Join-Path $caseDirectory 'k6-raw.json')
         endpoints = $endpoints
+        accepted_slo = [ordered]@{
+            ordinary_api = [ordered]@{
+                p50_ms_lt = 100
+                p95_ms_lt = 300
+                p99_ms_lt = 800
+                error_rate_lt = 0.01
+                met = $ordinarySloMet
+            }
+            login = [ordered]@{
+                p95_ms_lt = 750
+                error_rate_lt = 0.01
+                met = $loginSloMet
+            }
+            note = 'k6 retains the original 300 ms threshold for every endpoint; accepted login SLO is evaluated separately here'
+        }
         resources = [ordered]@{
             samples = $samples.Count
             scrape_failures = @($samples | Where-Object { $_.scrape_count -lt 2 }).Count
@@ -178,6 +204,13 @@ $result = [ordered]@{
     git_sha = $manifest.git_sha
     environment = $manifest
     runs = $runs
+}
+if ($phaseNumber -eq 16) {
+    $functionalPath = Join-Path $ResultsDirectory 'phase16-multi-functional-raw.json'
+    if (Test-Path -LiteralPath $functionalPath) {
+        $functional = Get-Content -Raw -LiteralPath $functionalPath | ConvertFrom-Json
+        $result.functional = $functional
+    }
 }
 $outputPath = Join-Path $ResultsDirectory "${phaseLabel}-summary.json"
 [System.IO.File]::WriteAllText($outputPath, ($result | ConvertTo-Json -Depth 12), [System.Text.UTF8Encoding]::new($false))

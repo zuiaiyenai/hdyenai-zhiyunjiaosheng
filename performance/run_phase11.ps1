@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("phase11", "phase13", "phase16-login")]
+    [ValidateSet("phase11", "phase13", "phase16-login", "phase16-multi")]
     [string]$RunPhase = "phase11",
     [int[]]$UserLevels = @(10, 50, 100, 200),
     [int]$Repetitions = 3,
@@ -7,6 +7,8 @@ param(
     [string]$SteadyDuration = "10m",
     [int]$StabilizationSeconds = 300,
     [int]$CollectorTailSeconds = 90,
+    [ValidateRange(0, 100)]
+    [int]$TaskSharePercent = 20,
     [int]$RedisDatabase = 14,
     [int]$RedisPort = 6380,
     [string]$K6Exe = "target\tools\k6-v2.2.0-windows-amd64\k6.exe",
@@ -19,7 +21,9 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
-$phaseNumber = if ($RunPhase -eq "phase13") { 13 } elseif ($RunPhase -eq "phase16-login") { 16 } else { 11 }
+$phaseNumber = if ($RunPhase -eq "phase13") { 13 }
+    elseif ($RunPhase -in @("phase16-login", "phase16-multi")) { 16 }
+    else { 11 }
 $runId = "p${phaseNumber}_$timestamp"
 $schema = "fctts_phase${phaseNumber}_$timestamp"
 $userPrefix = "phase${phaseNumber}_${runId}_"
@@ -37,10 +41,19 @@ $priorRedisPassword = $env:REDIS_PASSWORD
 $priorMySqlPassword = $env:MYSQL_PWD
 $priorDbUrl = $env:DB_URL
 $priorSpringDatasourceUrl = $env:SPRING_DATASOURCE_URL
+$nginxAccessLog = Join-Path $projectRoot 'deploy\nginx\logs\access.log'
+$nginxAccessLogStartLine = if (Test-Path -LiteralPath $nginxAccessLog) {
+    @(Get-Content -LiteralPath $nginxAccessLog).Count
+} else { 0 }
 
 if (($RunPhase -eq "phase11" -or $RunPhase -eq "phase16-login") -and
         ($UserLevels.Count -eq 0 -or ($UserLevels | Where-Object { $_ -notin @(10, 50, 100, 200) }))) {
     throw "$RunPhase UserLevels must contain only 10, 50, 100, and 200"
+}
+if ($RunPhase -eq "phase16-multi" -and
+        ($UserLevels.Count -ne 2 -or $UserLevels[0] -ne 100 -or $UserLevels[1] -ne 200 -or
+         $Repetitions -ne 1 -or $WarmupDuration -ne "10s" -or $SteadyDuration -ne "60s")) {
+    throw "Phase 16 multi-instance requires 100/200 VUs, one repetition, 10s warmup, and 60s steady duration"
 }
 if ($RunPhase -eq "phase13" -and
         ($UserLevels.Count -ne 1 -or $UserLevels[0] -ne 150 -or $Repetitions -ne 1 -or
@@ -117,7 +130,8 @@ function Wait-Redis([int]$TimeoutSeconds = 30) {
     throw "Dedicated $RunPhase Redis did not become ready on port $RedisPort"
 }
 
-function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name) {
+function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name,
+                       [bool]$ActiveWorkers = $false) {
     $stdout = Join-Path $resultsRoot "$Name.stdout.log"
     $stderr = Join-Path $resultsRoot "$Name.stderr.log"
     $arguments = @(
@@ -133,15 +147,33 @@ function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name) {
         '--server.tomcat.mbeanregistry.enabled=true',
         '--app.storage.provider=aliyun-oss',
         '--app.tasks.worker-count=1',
-        '--app.tasks.poll-interval=24h',
+        $(if ($ActiveWorkers) { '--app.tasks.poll-interval=250ms' }
+          else { '--app.tasks.poll-interval=24h' }),
         '--app.tasks.global-queue-limit=200',
         '--app.tasks.per-user-concurrency=2',
-        '--app.observability.external-services-required=false',
+        $(if ($RunPhase -eq 'phase16-multi') { '--app.observability.external-services-required=true' }
+          else { '--app.observability.external-services-required=false' }),
+        $(if ($ActiveWorkers) { '--app.cleanup.retry-delay=500ms' }
+          else { '--app.cleanup.retry-delay=5m' }),
+        '--app.cleanup.claim-timeout=5s',
         "--app.observability.environment=$RunPhase-$Name"
     )
     $process = Start-Process -FilePath $javaExe -ArgumentList $arguments -PassThru `
         -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     return $process
+}
+
+function Add-NginxUpstreamEvidence($Manifest) {
+    $counts = [ordered]@{ backend_1 = 0; backend_2 = 0; other = 0 }
+    if (Test-Path -LiteralPath $nginxAccessLog) {
+        @(Get-Content -LiteralPath $nginxAccessLog | Select-Object -Skip $nginxAccessLogStartLine) |
+            ForEach-Object {
+                if ($_ -match 'upstream=127\.0\.0\.1:8081') { $counts.backend_1++ }
+                elseif ($_ -match 'upstream=127\.0\.0\.1:8082') { $counts.backend_2++ }
+                elseif ($_ -match 'upstream=([^ ]+)') { $counts.other++ }
+            }
+    }
+    $Manifest | Add-Member -NotePropertyName nginx_upstreams -NotePropertyValue ([pscustomobject]$counts) -Force
 }
 
 function Assert-BackendSchema([string]$Name) {
@@ -233,10 +265,15 @@ try {
         steady_duration = $SteadyDuration
         stabilization_seconds = $StabilizationSeconds
         collector_tail_seconds = $CollectorTailSeconds
+        task_share_percent = $TaskSharePercent
         topology = 'nginx -> backend-1/backend-2 -> shared MySQL/Redis'
-        lane = if ($RunPhase -eq 'phase16-login') { 'LOGIN_PROFILE' } else { 'L0_CORE_API' }
+        lane = if ($RunPhase -eq 'phase16-login') { 'LOGIN_PROFILE' }
+            elseif ($RunPhase -eq 'phase16-multi') { 'MULTI_INSTANCE_MIXED' }
+            else { 'L0_CORE_API' }
         media_execution = if ($RunPhase -eq 'phase16-login') {
             'excluded; sustained login-only profiling with DB workers polling every 24h'
+        } elseif ($RunPhase -eq 'phase16-multi') {
+            'load lane enqueues/polls a small task share with workers suspended; functional lane restarts two 250ms workers for one real ASR task'
         } else {
             "excluded; DB workers poll every 24h during $RunPhase L0 mixed workload"
         }
@@ -281,6 +318,7 @@ try {
             $env:SEED = "$runId-$caseId"
             $env:USER_PREFIX = $userPrefix
             $env:SUMMARY_PATH = $summaryPath
+            $env:TASK_SHARE_PERCENT = "$TaskSharePercent"
             $k6Script = if ($RunPhase -eq 'phase16-login') { 'login-profile.js' } else { 'core-api.js' }
             & $K6Exe run --quiet --out "json=$rawPath" (Join-Path $PSScriptRoot $k6Script)
             $k6ExitCode = $LASTEXITCODE
@@ -313,7 +351,54 @@ try {
             Start-Sleep -Seconds 30
         }
     }
+    if ($RunPhase -eq 'phase16-multi') {
+        foreach ($process in @($backend1, $backend2)) {
+            if ($process -and -not $process.HasExited) {
+                Stop-Process -Id $process.Id -ErrorAction Stop
+                $process.WaitForExit()
+            }
+        }
+        Reset-GeneratedTasks
+        $backend1 = Start-Backend 8081 9091 'backend-1-functional' $true
+        $backendProcesses += $backend1
+        Wait-Ready 'http://127.0.0.1:9091/actuator/health/readiness'
+        Assert-BackendSchema 'backend-1-functional'
+        $backend2 = Start-Backend 8082 9092 'backend-2-functional' $true
+        $backendProcesses += $backend2
+        Wait-Ready 'http://127.0.0.1:9092/actuator/health/readiness'
+        Assert-BackendSchema 'backend-2-functional'
+        $functionalScript = Join-Path $PSScriptRoot 'phase16_multi_acceptance.ps1'
+        & $functionalScript -Schema $schema -UserPrefix $userPrefix -ResultsDirectory $resultsRoot `
+            -Backend1ProcessId $backend1.Id -MySqlExe $MySqlExe
+        if ($LASTEXITCODE -ne 0) { throw 'Phase 16 multi-instance functional acceptance failed' }
+
+        $functionalRawPath = Join-Path $resultsRoot 'phase16-multi-functional-raw.json'
+        $functional = Get-Content -Raw -LiteralPath $functionalRawPath | ConvertFrom-Json
+        $backend1 = Start-Backend 8081 9091 'backend-1-restarted' $true
+        $backendProcesses += $backend1
+        Wait-Ready 'http://127.0.0.1:9091/actuator/health/readiness'
+        Assert-BackendSchema 'backend-1-restarted'
+        $loginBody = @{ username = "$userPrefix$('{0:0000}' -f 1)"; password = $env:LOAD_TEST_PASSWORD } | ConvertTo-Json
+        $login = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8081/user/login' `
+            -ContentType 'application/json' -Body $loginBody -TimeoutSec 15
+        $headers = @{ Authorization = "Bearer $($login.token)" }
+        $taskAfterRestart = Invoke-RestMethod -Method Get `
+            -Uri "http://127.0.0.1:8081/api/tasks/$($functional.task_id)" `
+            -Headers $headers -TimeoutSec 15
+        if ($taskAfterRestart.status -ne 'SUCCESS' -or [int]$taskAfterRestart.attempts -ne 1) {
+            throw 'Task state did not survive backend restart'
+        }
+        $functional | Add-Member -NotePropertyName restart_check -NotePropertyValue ([pscustomobject]@{
+            backend = 'backend-1-restarted'
+            readiness = 'UP'
+            task_status = [string]$taskAfterRestart.status
+            attempts = [int]$taskAfterRestart.attempts
+        }) -Force
+        [System.IO.File]::WriteAllText($functionalRawPath,
+            ($functional | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+    }
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    Add-NginxUpstreamEvidence $manifest
     $manifest | Add-Member -NotePropertyName completed_at -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
     [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
     Write-Output "PHASE${phaseNumber}_RESULTS=$resultsRoot"

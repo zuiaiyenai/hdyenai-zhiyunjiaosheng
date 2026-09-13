@@ -1,0 +1,168 @@
+{
+  "phase": "16.7",
+  "status": "VERIFIED_WITH_HOST_LIMITS",
+  "formal_run_id": "p16_20260913194657",
+  "git_sha": "b7a9cd5aabbdfdbac5cc9ce7aafec17440b1b069",
+  "environment": {
+    "platform": "Windows local host",
+    "java": "17.0.19",
+    "mysql": "5.7.26",
+    "k6": "2.2.0",
+    "topology": "nginx -> backend-1/backend-2 -> shared MySQL/Redis/Alibaba Cloud OSS",
+    "registered_users": 1000,
+    "active_users": 200,
+    "task_share_percent": 2,
+    "warmup_seconds": 10,
+    "steady_seconds": 60,
+    "collector_tail_seconds": 10
+  },
+  "load_runs": [
+    {
+      "vus": 100,
+      "requests": 1892,
+      "rps": 31.533333333333335,
+      "error_rate": 0.0,
+      "http_status": {
+        "200": 1890,
+        "202": 2
+      },
+      "all_requests_ms": {
+        "p50": 4.112500000000001,
+        "p95": 478.28155999999996,
+        "p99": 487.94159599999995
+      },
+      "login_ms": {
+        "requests": 100,
+        "p50": 483.38935000000004,
+        "p95": 497.42745,
+        "p99": 500.23208500000004,
+        "accepted_p95_slo_ms": 750,
+        "slo_met": true
+      },
+      "ordinary_api_worst_p95_ms": 61.292914999999994,
+      "ordinary_api_worst_p95_endpoint": "task_create",
+      "ordinary_api_slo_met": true,
+      "task_create_requests": 2,
+      "task_status_requests": 28,
+      "resources": {
+        "host_cpu_p95_percent": 28.59767332456341,
+        "host_available_memory_min_mb": 417.0,
+        "two_backend_rss_max_mb": 1018.84,
+        "two_jvm_heap_max_mb": 345.731,
+        "gc_pause_seconds_delta": 0.016,
+        "jvm_threads_max": 176,
+        "tomcat_busy_max": 6,
+        "hikari_active_max": 1,
+        "hikari_pending_max": 0,
+        "executor_rejected_delta": 0,
+        "redis_cli_ping_p95_ms": 107.805,
+        "mysql_threads_connected_max": 21,
+        "mysql_threads_running_max": 1,
+        "mysql_slow_queries_delta": 0,
+        "pending_tasks_max": 2,
+        "prometheus_scrape_failures": 0
+      },
+      "legacy_k6_thresholds_passed": false,
+      "legacy_threshold_failure_reason": "The unchanged k6 script applies the ordinary p95 < 300 ms threshold to login and aggregate duration. Login is evaluated against the separately accepted p95 < 750 ms SLO."
+    },
+    {
+      "vus": 200,
+      "requests": 3711,
+      "rps": 61.85,
+      "error_rate": 0.0,
+      "http_status": {
+        "200": 3707,
+        "202": 4
+      },
+      "all_requests_ms": {
+        "p50": 3.127,
+        "p95": 480.5317,
+        "p99": 500.49031
+      },
+      "login_ms": {
+        "requests": 200,
+        "p50": 488.7277,
+        "p95": 511.20865499999996,
+        "p99": 525.25663,
+        "accepted_p95_slo_ms": 750,
+        "slo_met": true
+      },
+      "ordinary_api_worst_p95_ms": 50.49514999999998,
+      "ordinary_api_worst_p95_endpoint": "task_create",
+      "ordinary_api_slo_met": true,
+      "task_create_requests": 4,
+      "task_status_requests": 56,
+      "resources": {
+        "host_cpu_p95_percent": 44.34298753754562,
+        "host_available_memory_min_mb": 370.0,
+        "two_backend_rss_max_mb": 1037.883,
+        "two_jvm_heap_max_mb": 362.723,
+        "gc_pause_seconds_delta": 0.014,
+        "jvm_threads_max": 176,
+        "tomcat_busy_max": 12,
+        "hikari_active_max": 0,
+        "hikari_pending_max": 0,
+        "executor_rejected_delta": 0,
+        "redis_cli_ping_p95_ms": 114.7826,
+        "mysql_threads_connected_max": 10,
+        "mysql_threads_running_max": 1,
+        "mysql_slow_queries_delta": 0,
+        "pending_tasks_max": 4,
+        "prometheus_scrape_failures": 0
+      },
+      "legacy_k6_thresholds_passed": false,
+      "legacy_threshold_failure_reason": "The unchanged k6 script applies the ordinary p95 < 300 ms threshold to login and aggregate duration. Login is evaluated against the separately accepted p95 < 750 ms SLO."
+    }
+  ],
+  "nginx_upstream_requests": {
+    "backend_1": 3351,
+    "backend_2": 3371,
+    "other_or_retry_log_lines": 2,
+    "both_backends_received_requests": true
+  },
+  "functional_acceptance": {
+    "jwt_created_on_backend_1_used_on_backend_2": true,
+    "concurrent_same_file_submissions": 2,
+    "created_responses": 1,
+    "duplicate_responses": 1,
+    "async_task_rows": 1,
+    "task_terminal_status": "SUCCESS",
+    "task_attempts": 1,
+    "task_claim_events": 1,
+    "task_distinct_workers": 1,
+    "queried_and_downloaded_from_other_backend": true,
+    "result_bytes": 161,
+    "cleanup_claim_events": 1,
+    "cleanup_distinct_workers": 1,
+    "cleanup_row_removed": true,
+    "result_read_after_cleanup_http_status": 500,
+    "backend_1_shutdown_old_token_requests": 20,
+    "backend_1_shutdown_successful_requests": 20,
+    "backend_2_readiness_after_shutdown": "UP",
+    "backend_1_restart_readiness": "UP",
+    "task_status_after_backend_1_restart": "SUCCESS",
+    "task_attempts_after_backend_1_restart": 1
+  },
+  "evidence_integrity": {
+    "raw_request_count_matches_summary": true,
+    "functional_raw_sha256": "F8EC792290F42C45BAE2046E970FCEF71AEC11A9BFF8EE5259B20E6E38899145",
+    "phase16_summary_sha256": "B52D38BBF228F439850E184D17031F5525BB5F393FDE8FD5C3C1E54F28965A35",
+    "isolated_schema_removed": true,
+    "dedicated_redis_stopped": true,
+    "test_ports_released": true,
+    "discarded_diagnostic_run_orphan_cleanup": {
+      "exact_owner_prefix_only": true,
+      "objects_matched": 1,
+      "objects_deleted": 1,
+      "objects_remaining": 0
+    }
+  },
+  "boundaries": [
+    "The load lane proves HTTP task enqueue and poll only; those courseware tasks were not executed.",
+    "The functional lane executed one real ASR task through shared OSS and two active database workers.",
+    "The result is one local Windows host, not cloud, Linux, container, cross-host, TLS, or production traffic evidence.",
+    "The minimum observed host available memory was 370 MiB, so this host has little memory headroom while both real models are resident.",
+    "The Redis ping metric includes redis-cli process startup and is not server-only command latency.",
+    "WebSocket multi-instance routing and sticky-session behavior were not exercised."
+  ]
+}
