@@ -46,12 +46,7 @@ public class PPTServiceImpl implements PPTService {
     }
 
     public String processPptAndGenerateContent(MultipartFile file) throws IOException {
-        String fileId = uploadFile(new org.springframework.core.io.ByteArrayResource(file.getBytes()) {
-            @Override
-            public String getFilename() {
-                return file.getOriginalFilename();
-            }
-        }, file.getOriginalFilename());
+        String fileId = uploadFile(file.getResource(), file.getOriginalFilename());
         String fileContent = getFileContent(fileId);
         return generateCoursewareContent(fileContent);
     }

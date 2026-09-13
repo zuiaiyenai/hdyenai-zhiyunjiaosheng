@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "phase": "16.3",
+  "executed_at": "2026-09-14T01:01:20+08:00",
+  "timezone": "Asia/Shanghai",
+  "outcome": "VERIFIED",
+  "scope": "JVM media transfer path from task worker output file through local object storage",
+  "tested_git_base_sha": "66e5f6630e8684e23932fa2564fbacf4eb4e6a2b",
+  "source_state": "Phase 16.3 working tree on tested_git_base_sha",
+  "environment": {
+    "platform": "Windows",
+    "java": "Eclipse Temurin 17.0.19",
+    "max_heap_bytes": 100663296,
+    "max_heap_mib": 96
+  },
+  "protocol": {
+    "test_class": "com.a09.tts.task.MediaStreamingMemoryIntegrationTest",
+    "enabled_property": "fctts.it.media-streaming=true",
+    "jvm_arg": "-Xmx96m",
+    "result_sizes_bytes": [104857600, 524288000],
+    "result_sizes_mib": [100, 500],
+    "source_shape": "sparse synthetic video result",
+    "path": "TaskWorkDispatcher -> ManagedObjectStorageService.storeFile -> LocalObjectStorageService.store",
+    "checks": [
+      "stored metadata size equals logical result size",
+      "worker temporary output is deleted",
+      "peak heap growth remains below 64 MiB",
+      "result object and input object are deleted after each case"
+    ]
+  },
+  "results": [
+    {
+      "size_bytes": 104857600,
+      "heap_before_bytes": 17074904,
+      "heap_peak_bytes": 20220632,
+      "heap_at_completion_bytes": 20220632,
+      "heap_after_gc_bytes": 17213624,
+      "peak_growth_bytes": 3145728,
+      "gc_count_delta": 0,
+      "gc_time_delta_ms": 0,
+      "status": "PASS"
+    },
+    {
+      "size_bytes": 524288000,
+      "heap_before_bytes": 17231488,
+      "heap_peak_bytes": 17231488,
+      "heap_at_completion_bytes": 17231488,
+      "heap_after_gc_bytes": 17239040,
+      "peak_growth_bytes": 0,
+      "gc_count_delta": 0,
+      "gc_time_delta_ms": 0,
+      "status": "PASS"
+    }
+  ],
+  "validation": {
+    "focused_tests": 19,
+    "focused_failures": 0,
+    "focused_errors": 0,
+    "memory_integration_tests": 1,
+    "memory_integration_failures": 0,
+    "memory_integration_errors": 0,
+    "full_maven_tests": 148,
+    "full_maven_failures": 0,
+    "full_maven_errors": 0,
+    "full_maven_skipped": 10
+  },
+  "verified": [
+    "100 MiB and 500 MiB synthetic result files complete with a 96 MiB maximum heap",
+    "heap growth does not scale with logical file size",
+    "video result storage uses Path and InputStream rather than a complete byte array",
+    "video and courseware TTS audio use chunked streaming to temporary files",
+    "worker temporary video output is deleted after storage",
+    "PPT MultipartFile upload no longer calls getBytes"
+  ],
+  "not_verified": [
+    "real FFmpeg processing of 100 MiB or 500 MiB video",
+    "complete real FunASR GPT-SoVITS video workflow",
+    "Aliyun OSS throughput memory and failure behavior",
+    "large Moonshot PPT request memory behavior",
+    "production or Linux filesystem behavior"
+  ]
+}

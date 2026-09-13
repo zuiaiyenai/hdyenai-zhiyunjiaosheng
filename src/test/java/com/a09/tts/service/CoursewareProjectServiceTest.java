@@ -15,7 +15,6 @@ import com.a09.tts.api.ConflictException;
 import com.a09.tts.api.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
@@ -23,6 +22,7 @@ import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.time.Instant;
 import java.nio.file.Path;
 import java.util.zip.ZipFile;
@@ -38,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -76,8 +77,12 @@ class CoursewareProjectServiceTest {
         when(pptService.processPptAndGenerateContent(any())).thenReturn("第一版教学讲稿");
         when(pptService.optimizeCoursewareContent(anyString(), anyString()))
                 .thenReturn("第二版教学讲稿，包含课堂提问");
-        when(ttsService.tts(anyString(), eq("longxiao"), anyDouble(), anyDouble(), anyDouble()))
-                .thenReturn(ResponseEntity.ok(new byte[]{82, 73, 70, 70}));
+        doAnswer(invocation -> {
+            OutputStream output = invocation.getArgument(5);
+            output.write(new byte[]{82, 73, 70, 70});
+            return null;
+        }).when(ttsService).stream(anyString(), eq("longxiao"), anyDouble(), anyDouble(),
+                anyDouble(), any(OutputStream.class));
 
         CoursewareProjectService service = service(
                 pptService, ttsService, new InMemoryCoursewareProjectRepository());

@@ -25,7 +25,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -286,14 +285,14 @@ public class CoursewareProjectService {
                 List<String> chunks = splitScript(state.script);
                 List<Path> parts = new ArrayList<>();
                 for (int index = 0; index < chunks.size(); index++) {
-                    ResponseEntity<byte[]> response = ttsService.tts(
-                            chunks.get(index), voice, speed, pitch, rhythm);
-                    byte[] audio = response.getBody();
-                    if (audio == null || audio.length == 0) {
+                    Path part = state.directory.resolve(String.format("narration-%03d.wav", index + 1));
+                    try (var output = Files.newOutputStream(part)) {
+                        ttsService.stream(
+                                chunks.get(index), voice, speed, pitch, rhythm, output);
+                    }
+                    if (!Files.isRegularFile(part) || Files.size(part) == 0) {
                         throw new IOException("语音服务未返回音频");
                     }
-                    Path part = state.directory.resolve(String.format("narration-%03d.wav", index + 1));
-                    Files.write(part, audio);
                     parts.add(part);
                 }
                 state.audio = parts.size() == 1 ? parts.get(0) : concatAudio(state, parts);

@@ -10,7 +10,6 @@ import org.apache.poi.xslf.usermodel.XSLFTextBox;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -23,6 +22,7 @@ import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 class CoursewareMediaIntegrationTest {
@@ -46,8 +47,12 @@ class CoursewareMediaIntegrationTest {
         TTSService ttsService = mock(TTSService.class);
         when(pptService.processPptAndGenerateContent(any()))
                 .thenReturn("欢迎学习人工智能导论。".repeat(500));
-        when(ttsService.tts(anyString(), anyString(), anyDouble(), anyDouble(), anyDouble()))
-                .thenReturn(ResponseEntity.ok(oneSecondWav()));
+        doAnswer(invocation -> {
+            OutputStream output = invocation.getArgument(5);
+            output.write(oneSecondWav());
+            return null;
+        }).when(ttsService).stream(anyString(), anyString(), anyDouble(), anyDouble(),
+                anyDouble(), any(OutputStream.class));
 
         CoursewareProjectService service = new CoursewareProjectService(
                 pptService, ttsService, new UploadSecurityService(),

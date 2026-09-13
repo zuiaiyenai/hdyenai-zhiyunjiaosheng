@@ -160,11 +160,21 @@ public class TaskWorkDispatcher implements TaskDispatcher {
     private String executeVideoSwap(TaskRecord task) throws Exception {
         TaskPayloads.VideoSwap payload = payload(task, TaskPayloads.VideoSwap.class);
         return objectStorage.withTemporaryCopy(task.owner(), payload.objectKey(), path -> {
-            ResponseEntity<byte[]> response = videoService.processVideo(
-                    path.toString(), payload.voiceType(), 1.0, 1.0, 1.0,
-                    payload.transcript(), payload.subtitles(), payload.includeSubtitles());
-            byte[] body = requireBody(response, "视频换声未生成结果");
-            return storeBytes(task, payload.uploadId(), "video.mp4", body, "video/mp4");
+            Path output = Files.createTempFile("fctts-video-result-", ".mp4");
+            try {
+                videoService.processVideo(
+                        path.toString(), payload.voiceType(), 1.0, 1.0, 1.0,
+                        payload.transcript(), payload.subtitles(), payload.includeSubtitles(),
+                        output);
+                if (!Files.isRegularFile(output) || Files.size(output) == 0) {
+                    throw new IllegalStateException("视频换声未生成结果");
+                }
+                String key = resultKey(task, payload.uploadId(), "video.mp4");
+                objectStorage.storeFile(task.owner(), key, output, "video/mp4");
+                return key;
+            } finally {
+                Files.deleteIfExists(output);
+            }
         });
     }
 

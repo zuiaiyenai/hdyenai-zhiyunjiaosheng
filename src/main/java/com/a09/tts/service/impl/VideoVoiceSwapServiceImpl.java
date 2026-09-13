@@ -10,9 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -57,16 +57,20 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
         this(asrService, ttsService, new ExternalProcessRunner(Duration.ofMinutes(10)));
     }
 
-    public ResponseEntity<byte[]> processVideo(String videoPath, String voiceType,
-                                                double speed, double pitch, double rhythm) throws Exception {
-        return processVideo(videoPath, voiceType, speed, pitch, rhythm,
-                null, null, true);
+    public void processVideo(String videoPath, String voiceType,
+                             double speed, double pitch, double rhythm,
+                             Path outputPath) throws Exception {
+        processVideo(videoPath, voiceType, speed, pitch, rhythm,
+                null, null, true, outputPath);
     }
 
-    public ResponseEntity<byte[]> processVideo(String videoPath, String voiceType,
-                                                double speed, double pitch, double rhythm,
-                                                String transcript, String subtitles,
-                                                boolean includeSubtitles) throws Exception {
+    public void processVideo(String videoPath, String voiceType,
+                             double speed, double pitch, double rhythm,
+                             String transcript, String subtitles,
+                             boolean includeSubtitles, Path outputPath) throws Exception {
+        if (outputPath == null) {
+            throw new IllegalArgumentException("视频输出路径不能为空");
+        }
         Path jobDir = createJobDirectory();
         try {
             AsrResult recognized = null;
@@ -81,14 +85,8 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
             }
             log.info("视频ASR识别结果: {}", extractedText);
 
-            ResponseEntity<byte[]> clonedAudioResponse = ttsService.tts(extractedText, voiceType);
-            if (!clonedAudioResponse.getStatusCode().is2xxSuccessful()
-                    || clonedAudioResponse.getBody() == null
-                    || clonedAudioResponse.getBody().length == 0) {
-                throw new Exception("TTS 语音合成失败，请确保TTS服务已启动");
-            }
-
-            String clonedAudioPath = saveTempAudio(jobDir, clonedAudioResponse.getBody());
+            String clonedAudioPath = synthesizeTempAudio(
+                    jobDir, extractedText, voiceType, speed, pitch, rhythm);
             String subtitlePath = null;
             if (includeSubtitles) {
                 double duration = probeDuration(videoPath);
@@ -102,9 +100,8 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
                 subtitlePath = saveSubtitles(jobDir, effectiveSubtitles);
             }
 
-            String finalVideoPath = mergeAudioAndSubtitles(
-                    videoPath, clonedAudioPath, subtitlePath, jobDir);
-            return serveFile(finalVideoPath);
+            mergeAudioAndSubtitles(
+                    videoPath, clonedAudioPath, subtitlePath, outputPath);
         } finally {
             deleteJobDirectory(jobDir);
         }
@@ -159,9 +156,14 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
                 audioOutputPath);
     }
 
-    private String mergeAudioAndSubtitles(String videoPath, String newAudioPath,
-                                          String subtitlePath, Path jobDir) throws Exception {
-        String outputVideoPath = jobDir.resolve("final_output.mp4").toString();
+    private void mergeAudioAndSubtitles(String videoPath, String newAudioPath,
+                                        String subtitlePath, Path outputPath) throws Exception {
+        Path normalizedOutput = outputPath.toAbsolutePath().normalize();
+        Path parent = normalizedOutput.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        String outputVideoPath = normalizedOutput.toString();
         List<String> command = new ArrayList<>();
         double videoDuration = probeDuration(videoPath);
         double audioDuration = probeDuration(newAudioPath);
@@ -174,7 +176,6 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
 
         processRunner.run(command, "视频合成失败");
         log.info("最终视频合成完成: {}", outputVideoPath);
-        return outputVideoPath;
     }
 
     List<String> buildMergeCommand(
@@ -235,10 +236,17 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
         return duration;
     }
 
-    private String saveTempAudio(Path jobDir, byte[] audioData) throws Exception {
-        String path = jobDir.resolve("cloned_audio.wav").toString();
-        Files.write(Paths.get(path), audioData);
-        return path;
+    private String synthesizeTempAudio(
+            Path jobDir, String text, String voiceType,
+            double speed, double pitch, double rhythm) throws Exception {
+        Path path = jobDir.resolve("cloned_audio.wav");
+        try (OutputStream output = Files.newOutputStream(path)) {
+            ttsService.stream(text, voiceType, speed, pitch, rhythm, output);
+        }
+        if (!Files.isRegularFile(path) || Files.size(path) == 0) {
+            throw new Exception("TTS 语音合成失败，请确保TTS服务已启动");
+        }
+        return path.toString();
     }
 
     private String saveSubtitles(Path jobDir, String subtitles) throws Exception {
@@ -355,13 +363,4 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
         }
     }
 
-    private ResponseEntity<byte[]> serveFile(String filePath) throws Exception {
-        Path path = Paths.get(filePath);
-        byte[] data = Files.readAllBytes(path);
-        log.info("返回已处理视频: {}", filePath);
-        return ResponseEntity.ok()
-                .header("Content-Type", "video/mp4")
-                .header("Content-Disposition", "attachment; filename=final_output.mp4")
-                .body(data);
-    }
 }

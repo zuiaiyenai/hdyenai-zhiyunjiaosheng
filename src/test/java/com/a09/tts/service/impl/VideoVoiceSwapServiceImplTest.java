@@ -1,15 +1,34 @@
 package com.a09.tts.service.impl;
 
 import com.a09.tts.api.AsrResult;
+import com.a09.tts.media.ExternalProcessRunner;
+import com.a09.tts.service.TTSService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class VideoVoiceSwapServiceImplTest {
+    @TempDir
+    Path root;
+
 
     @Test
     void extractedAudioUsesFunAsrCompatiblePcmFormat() {
@@ -90,6 +109,40 @@ class VideoVoiceSwapServiceImplTest {
                 .equals("atempo=2.000000,atempo=2.000000"));
         assertTrue(service.buildAtempoFilter(0.25)
                 .equals("atempo=0.500000,atempo=0.500000"));
+    }
+
+    @Test
+    void streamsSynthesizedAudioAndWritesVideoToCallerOwnedPath() throws Exception {
+        TTSService tts = mock(TTSService.class);
+        doAnswer(invocation -> {
+            OutputStream output = invocation.getArgument(5);
+            output.write(new byte[]{1, 2, 3});
+            return null;
+        }).when(tts).stream(anyString(), anyString(), anyDouble(), anyDouble(), anyDouble(), any());
+        ExternalProcessRunner runner = mock(ExternalProcessRunner.class);
+        when(runner.run(anyList(), anyString())).thenAnswer(invocation -> {
+            List<String> command = invocation.getArgument(0);
+            if (command.contains("-show_entries")) {
+                return new ExternalProcessRunner.ProcessResult(0, "1.0");
+            }
+            Files.write(Path.of(command.get(command.size() - 1)), new byte[]{4, 5, 6});
+            return new ExternalProcessRunner.ProcessResult(0, "");
+        });
+        VideoVoiceSwapServiceImpl service = new VideoVoiceSwapServiceImpl(null, tts, runner);
+        ReflectionTestUtils.setField(service, "outputDir", root.toString());
+        ReflectionTestUtils.setField(service, "ffmpegPath", "ffmpeg");
+        ReflectionTestUtils.setField(service, "ffprobePath", "ffprobe");
+        Path output = root.resolve("result.mp4");
+
+        service.processVideo("input.mp4", "voice", 1.1, 0.9, 1.2,
+                "已校对文本", null, false, output);
+
+        assertEquals(3, Files.size(output));
+        verify(tts).stream(eq("已校对文本"), eq("voice"), eq(1.1), eq(0.9), eq(1.2),
+                org.mockito.ArgumentMatchers.any(OutputStream.class));
+        try (var files = Files.list(root)) {
+            assertFalse(files.anyMatch(path -> path.getFileName().toString().startsWith("video-")));
+        }
     }
 
 
