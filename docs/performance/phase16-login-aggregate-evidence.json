@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "phase": "16.1",
+  "executed_at": "2026-09-13",
+  "timezone": "Asia/Shanghai",
+  "outcome": "ACCEPTED",
+  "application_git_sha": "89c8b7b1819424ba7d9f81c20f2c7db76cc0c437",
+  "raw_evidence": {
+    "local_path": "target/phase16-login-live-20260913142802",
+    "hashes_sha256": {
+      "run-manifest.json": "77D4C9321814D7FF42CEAFD4ECC32D0CEFD90C60669942139D28F286927B43FC",
+      "10u-r1/k6-summary.json": "5BE0A9AE50CAC2B4DCF0E894FB1A7F494B6EFA6108288F414620AFA0D001308F",
+      "10u-r1/resource-samples.jsonl": "8D3BA8E69FF4C457923473280229B258C7D052386BF166EFDBC91EE55C4FC07B",
+      "10u-r1/k6-raw.json": "8625157CD855C7547A843508A2B1BE93E9B6E29508C9AC99EEB2401FC6ED716E",
+      "50u-r1/k6-summary.json": "D5A669BC2C34708DAC139E20B791A111E9828AA1B27E527DE4364098CE6B9FD4",
+      "50u-r1/resource-samples.jsonl": "07159B85FE9C9B8F4FB6B7C3A8DB9856880F2E7E91AE13D35A234F3C3454CEE5",
+      "50u-r1/k6-raw.json": "5CF2D4184C40E98C510751B216AE50E058368D025F568C002E1299EBC2154C4B",
+      "100u-r1/k6-summary.json": "B36B7E89629142E83D611374B9DC593D0C326BCBEA8220891C281553A534E1B2",
+      "100u-r1/resource-samples.jsonl": "DE5665D2AFF817EE604C95E70EFCCC2033FAD3B6D487B44C27BE2AB0695FEEE6",
+      "100u-r1/k6-raw.json": "F6FBFB9C7527430B753151501363631515F290364029C34A102449175928007C",
+      "200u-r1/k6-summary.json": "68427E724654E7276570E51135599F48F874CFEE711A18AE73854639FB138C63",
+      "200u-r1/resource-samples.jsonl": "8DC5D43E9F1662B6DB8C78D998602E85BAD355E2F93CC59DE671FAB05B42EFCD",
+      "200u-r1/k6-raw.json": "DA03BBEA2EBFD9B2354A0E38F7699F48E2734D99E55B34F1AE7F6C8B6AA5B119"
+    },
+    "collector_complete_cases": 4,
+    "k6_exit_codes": [0, 0, 0, 0],
+    "backend_and_collector_stderr_empty": true,
+    "test_ports_after_run": 0,
+    "isolated_schema_after_run": 0,
+    "business_schema_after_run": 1
+  },
+  "protocol": {
+    "topology": "nginx -> two Java 17 backends -> shared MySQL and dedicated ephemeral Redis",
+    "registered_users": 1000,
+    "virtual_user_levels": [10, 50, 100, 200],
+    "login_interval_seconds_per_vu": 30,
+    "stabilization_seconds": 60,
+    "warmup_seconds_per_case": 120,
+    "steady_seconds_per_case": 600,
+    "collector_tail_seconds_per_case": 90,
+    "repetitions": 1,
+    "bcrypt_cost": 12
+  },
+  "environment": {
+    "platform": "Windows",
+    "logical_processors": 32,
+    "java": "Eclipse Temurin 17.0.19",
+    "mysql": "5.7.26",
+    "redis": "dedicated process on 6381 DB 13",
+    "k6": "2.2.0",
+    "backend_instances": 2,
+    "backend_heap_limit_mib_each": 512
+  },
+  "slo": {
+    "former_generic_api_slo": {
+      "p50_ms_lt": 100,
+      "p95_ms_lt": 300,
+      "status": "NOT_MET_AND_NOT_APPROPRIATE_FOR_BCRYPT_LOGIN"
+    },
+    "accepted_authentication_slo": {
+      "p95_ms_lt": 750,
+      "p99_ms_lt": 1000,
+      "error_rate_lt": 0.01,
+      "status": "MET_AT_ALL_TESTED_LEVELS"
+    }
+  },
+  "results": [
+    {
+      "vus": 10,
+      "steady_requests": 197,
+      "steady_login_rps": 0.3283,
+      "error_rate": 0,
+      "p50_ms": 488.34,
+      "p95_ms": 514.42,
+      "p99_ms": 537.32,
+      "max_ms": 565.68,
+      "stage_average_ms": {"total": 489.94, "rate_limit": 1.94, "redis": 1.84, "database": 1.50, "bcrypt": 485.90, "jwt": 0.33},
+      "bcrypt_share_percent": 99.18,
+      "resources": {"host_cpu_avg_percent": 5.13, "host_cpu_p95_percent": 9.16, "host_cpu_max_percent": 46.56, "backend_rss_max_mib": 957.9, "jvm_heap_max_mib": 361.7, "gc_pause_seconds": 0.029, "gc_pause_count": 8, "mysql_threads_connected_max": 4, "mysql_threads_running_max": 1, "hikari_pending_max": 0, "tomcat_busy_max": 2, "available_memory_min_mib": 4437}
+    },
+    {
+      "vus": 50,
+      "steady_requests": 986,
+      "steady_login_rps": 1.6433,
+      "error_rate": 0,
+      "p50_ms": 505.02,
+      "p95_ms": 559.10,
+      "p99_ms": 568.77,
+      "max_ms": 599.88,
+      "stage_average_ms": {"total": 505.63, "rate_limit": 2.12, "redis": 2.07, "database": 1.20, "bcrypt": 502.03, "jwt": 0.16},
+      "bcrypt_share_percent": 99.29,
+      "resources": {"host_cpu_avg_percent": 11.73, "host_cpu_p95_percent": 20.88, "host_cpu_max_percent": 38.69, "backend_rss_max_mib": 1001.6, "jvm_heap_max_mib": 360.8, "gc_pause_seconds": 0.032, "gc_pause_count": 8, "mysql_threads_connected_max": 5, "mysql_threads_running_max": 1, "hikari_pending_max": 0, "tomcat_busy_max": 4, "available_memory_min_mib": 2588}
+    },
+    {
+      "vus": 100,
+      "steady_requests": 1969,
+      "steady_login_rps": 3.2817,
+      "error_rate": 0,
+      "p50_ms": 531.15,
+      "p95_ms": 563.67,
+      "p99_ms": 574.02,
+      "max_ms": 613.90,
+      "stage_average_ms": {"total": 528.07, "rate_limit": 1.77, "redis": 1.75, "database": 0.96, "bcrypt": 525.14, "jwt": 0.12},
+      "bcrypt_share_percent": 99.44,
+      "resources": {"host_cpu_avg_percent": 14.03, "host_cpu_p95_percent": 18.58, "host_cpu_max_percent": 29.26, "backend_rss_max_mib": 1015.8, "jvm_heap_max_mib": 370.2, "gc_pause_seconds": 0.044, "gc_pause_count": 10, "mysql_threads_connected_max": 9, "mysql_threads_running_max": 1, "hikari_pending_max": 0, "tomcat_busy_max": 4, "available_memory_min_mib": 2536}
+    },
+    {
+      "vus": 200,
+      "steady_requests": 3931,
+      "steady_login_rps": 6.5517,
+      "error_rate": 0,
+      "p50_ms": 529.70,
+      "p95_ms": 561.97,
+      "p99_ms": 581.90,
+      "max_ms": 671.08,
+      "stage_average_ms": {"total": 526.57, "rate_limit": 1.84, "redis": 1.82, "database": 0.82, "bcrypt": 523.78, "jwt": 0.07},
+      "bcrypt_share_percent": 99.47,
+      "resources": {"host_cpu_avg_percent": 23.04, "host_cpu_p95_percent": 42.91, "host_cpu_max_percent": 69.40, "backend_rss_max_mib": 916.6, "jvm_heap_max_mib": 368.3, "gc_pause_seconds": 0.030, "gc_pause_count": 10, "mysql_threads_connected_max": 14, "mysql_threads_running_max": 1, "hikari_pending_max": 0, "tomcat_busy_max": 7, "available_memory_min_mib": 1126}
+    }
+  ],
+  "validation": {
+    "steady_requests_total": 7083,
+    "steady_errors_total": 0,
+    "full_maven_tests_before_manifest_fix": 142,
+    "maven_failures": 0,
+    "maven_errors": 0,
+    "maven_skipped": 8,
+    "manifest_fix_focused_tests": 4,
+    "maven_package": "PASS"
+  },
+  "verified": [
+    "Four login-only levels from 10 to 200 VU with ten steady minutes each",
+    "Zero business errors across 7083 steady logins",
+    "BCrypt is the dominant login stage while DB Redis and JWT are not bottlenecks",
+    "BCrypt cost 12 was retained",
+    "All tested levels meet the authentication-specific SLO"
+  ],
+  "not_verified": [
+    "Production or Linux host behavior",
+    "200 simultaneously-started login requests",
+    "Arrival rates above 6.55 login per second",
+    "Longer login-only soak",
+    "Cloud load balancer or cross-region behavior"
+  ]
+}
