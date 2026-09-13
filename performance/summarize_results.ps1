@@ -7,6 +7,10 @@ $ErrorActionPreference = "Stop"
 $manifestPath = Join-Path $ResultsDirectory 'run-manifest.json'
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Missing run manifest: $manifestPath" }
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+$phaseNumber = if ($manifest.PSObject.Properties['phase']) { [int]$manifest.phase } else { 11 }
+if ($phaseNumber -notin @(11, 13)) { throw "Unsupported performance phase: $phaseNumber" }
+$phaseLabel = "phase$phaseNumber"
+$pendingTasksMetric = "${phaseLabel}_tasks_pending"
 
 function Metric($Summary, [string]$Name) {
     $property = $Summary.metrics.PSObject.Properties[$Name]
@@ -73,7 +77,9 @@ foreach ($run in $manifest.runs) {
     $summary = Get-Content -Raw -LiteralPath (Join-Path $caseDirectory 'k6-summary.json') | ConvertFrom-Json
     $samples = @(Get-Content -LiteralPath (Join-Path $caseDirectory 'resource-samples.jsonl') |
         ForEach-Object { $_ | ConvertFrom-Json })
-    $durationSeconds = [double]$summary.phase11.steadyDurationSeconds
+    $workloadMetadata = $summary.PSObject.Properties['phase11']
+    if (-not $workloadMetadata) { throw "Missing workload metadata in $($run.case_id) k6 summary" }
+    $durationSeconds = [double]$workloadMetadata.Value.steadyDurationSeconds
     $totalRequests = Value (Metric $summary 'fctts_l0_requests') 'count'
     $duration = Metric $summary 'fctts_l0_duration'
     $errors = Metric $summary 'fctts_l0_errors'
@@ -157,18 +163,22 @@ foreach ($run in $manifest.runs) {
             mysql_threads_connected_max = Max-Number $samples { $_.mysql.Threads_connected }
             mysql_threads_running_max = Max-Number $samples { $_.mysql.Threads_running }
             mysql_slow_queries_delta = Counter-Delta $samples { $_.mysql.Slow_queries }
-            pending_tasks_max = Max-Number $samples { $_.mysql.phase11_tasks_pending }
+            pending_tasks_max = Max-Number $samples {
+                $property = $_.mysql.PSObject.Properties[$pendingTasksMetric]
+                if ($property) { $property.Value }
+            }
         }
     }
 }
 
 $result = [ordered]@{
     generated_at = [DateTime]::UtcNow.ToString('o')
+    phase = $phaseNumber
     run_id = $manifest.run_id
     git_sha = $manifest.git_sha
     environment = $manifest
     runs = $runs
 }
-$outputPath = Join-Path $ResultsDirectory 'phase11-summary.json'
+$outputPath = Join-Path $ResultsDirectory "${phaseLabel}-summary.json"
 [System.IO.File]::WriteAllText($outputPath, ($result | ConvertTo-Json -Depth 12), [System.Text.UTF8Encoding]::new($false))
 Write-Output $outputPath

@@ -22,7 +22,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($Schema -notmatch '^fctts_phase11_[a-z0-9_]+$' -or $Schema -eq 'zhiyunjiaos') {
+if ($Schema -notmatch '^fctts_phase(11|13)_[a-z0-9_]+$' -or $Schema -eq 'zhiyunjiaos') {
     throw "Refusing unsafe schema name: $Schema"
 }
 if ($DurationSeconds -lt 1 -or $IntervalSeconds -lt 1) {
@@ -40,6 +40,7 @@ $logicalProcessors = [Environment]::ProcessorCount
 $backendProcessIds = @($Backend1ProcessId, $Backend2ProcessId)
 $previousCpu = @{}
 $previousAt = Get-Date
+$phaseLabel = if ($Schema -match '^fctts_phase13_') { 'phase13' } else { 'phase11' }
 
 function Read-LocalScalar([string]$Pattern, [string]$Description) {
     $raw = Get-Content -Raw -LiteralPath $localConfig
@@ -51,7 +52,7 @@ function Read-LocalScalar([string]$Pattern, [string]$Description) {
 function Read-RedisPassword {
     if ($env:REDISCLI_AUTH) { return $env:REDISCLI_AUTH }
     if ($env:REDIS_PASSWORD) { return $env:REDIS_PASSWORD }
-    throw "Dedicated Phase 11 Redis password is missing from the process environment"
+    throw "Dedicated load-test Redis password is missing from the process environment"
 }
 
 function Sum-PrometheusMetric([string[]]$Texts, [string]$Name, [string]$LabelPattern = '') {
@@ -75,7 +76,7 @@ function Read-MySqlStatus([string]$Password) {
     $previousPassword = $env:MYSQL_PWD
     try {
         $env:MYSQL_PWD = $Password
-        $query = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Threads_running','Connections','Max_used_connections','Slow_queries','Aborted_connects'); SELECT 'phase11_users',COUNT(*) FROM ``$Schema``.user; SELECT 'phase11_tasks_pending',COUNT(*) FROM ``$Schema``.async_task WHERE status='PENDING';"
+        $query = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Threads_running','Connections','Max_used_connections','Slow_queries','Aborted_connects'); SELECT '${phaseLabel}_users',COUNT(*) FROM ``$Schema``.user; SELECT '${phaseLabel}_tasks_pending',COUNT(*) FROM ``$Schema``.async_task WHERE status='PENDING';"
         $lines = & $MySqlExe -h 127.0.0.1 -P 3306 -u root --protocol=tcp --batch --skip-column-names -e $query
         if ($LASTEXITCODE -ne 0) { throw "mysql status query failed" }
         $result = @{}

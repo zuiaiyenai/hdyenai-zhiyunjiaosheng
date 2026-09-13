@@ -4,12 +4,12 @@
 
 ## 安全边界
 
-- 只允许使用名称匹配 `fctts_phase11_*` 的专用 MySQL schema；脚本显式拒绝 `zhiyunjiaos`。
+- 只允许使用名称匹配 `fctts_phase11_*` 或 `fctts_phase13_*` 的专用 MySQL schema；脚本显式拒绝 `zhiyunjiaos`。
 - 压测脚本在本机 6380 自启无持久化的隔离 Redis，并使用专用 DB 14；不会重启、清空或复用日常开发的 6379 Redis。
 - OSS、数据库、JWT 凭证仅从被 Git 忽略的 `config/application-local.yml` 读取；隔离 Redis 和压测账号使用运行时随机密码。凭证不写入报告或结果文件，临时 Redis 配置在清理阶段删除。
 - 运行时账号密码随机生成，只通过进程环境传递；数据库只保存 BCrypt strength 12 哈希。
 - 两个 task worker 的轮询间隔临时设为 24 小时，压测产生的任务保持 `PENDING`。因此 task create/status 是 L0 准入测试，不是重媒体吞吐证明。
-- 原始 k6 JSON、应用日志和逐 5 秒资源样本保存在被忽略的 `target/phase11-live-*`。
+- 原始 k6 JSON、应用日志和逐 5 秒资源样本保存在被忽略的 `target/phase11-live-*` 或 `target/phase13-live-*`。
 
 ## 工作负载
 
@@ -83,3 +83,26 @@ k6 的 closed-model scenario、request tags、thresholds、custom metrics 和 `h
 ```
 
 正式协议每档至少 3 个连续并发波次且不少于 6 个任务，并使用 30 秒输入测 FFmpeg。不要缩短后仍称为 Phase 12 容量证明。结果范围和本机结论见 `docs/performance/PHASE12_HEAVY_TASKS.md`。
+
+## Phase 13 Soak
+
+Phase 13 复用 Phase 11 已验证的双实例、专用 MySQL schema、隔离 Redis 和完整资源采集流程，但固定使用已通过的 200 VU 非登录容量点的 75%，即 150 VU。默认 2 分钟 warmup、30 分钟 steady 和 5 分钟恢复尾窗：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File performance/run_phase13.ps1
+```
+
+环境允许时可运行 60 分钟：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File performance/run_phase13.ps1 -DurationMinutes 60
+```
+
+运行结束后汇总：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File performance/summarize_results.ps1 `
+  -ResultsDirectory target/phase13-live-<UTC timestamp>
+```
+
+该 workload 混合登录、音色列表/搜索、课件列表、任务准入和状态轮询，但不执行媒体 worker；重媒体 soak 必须单独报告，不能由本运行替代。实测结果与证据边界见 `docs/performance/PHASE13_SOAK.md`。

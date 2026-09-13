@@ -1,4 +1,6 @@
 param(
+    [ValidateSet("phase11", "phase13")]
+    [string]$RunPhase = "phase11",
     [int[]]$UserLevels = @(10, 50, 100, 200),
     [int]$Repetitions = 3,
     [string]$WarmupDuration = "2m",
@@ -17,10 +19,11 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddHHmmss')
-$runId = "p11_$timestamp"
-$schema = "fctts_phase11_$timestamp"
-$userPrefix = "phase11_${runId}_"
-$resultsRoot = Join-Path $projectRoot "target\phase11-live-$timestamp"
+$phaseNumber = if ($RunPhase -eq "phase13") { 13 } else { 11 }
+$runId = "p${phaseNumber}_$timestamp"
+$schema = "fctts_phase${phaseNumber}_$timestamp"
+$userPrefix = "phase${phaseNumber}_${runId}_"
+$resultsRoot = Join-Path $projectRoot "target\$RunPhase-live-$timestamp"
 $manifestPath = Join-Path $resultsRoot "run-manifest.json"
 $localConfig = Join-Path $projectRoot "config\application-local.yml"
 $jar = Join-Path $projectRoot "target\tts-0.0.1-SNAPSHOT.jar"
@@ -34,8 +37,14 @@ $priorMySqlPassword = $env:MYSQL_PWD
 $priorDbUrl = $env:DB_URL
 $priorSpringDatasourceUrl = $env:SPRING_DATASOURCE_URL
 
-if ($UserLevels.Count -eq 0 -or ($UserLevels | Where-Object { $_ -notin @(10, 50, 100, 200) })) {
-    throw "UserLevels must contain only 10, 50, 100, and 200"
+if ($RunPhase -eq "phase11" -and
+        ($UserLevels.Count -eq 0 -or ($UserLevels | Where-Object { $_ -notin @(10, 50, 100, 200) }))) {
+    throw "Phase 11 UserLevels must contain only 10, 50, 100, and 200"
+}
+if ($RunPhase -eq "phase13" -and
+        ($UserLevels.Count -ne 1 -or $UserLevels[0] -ne 150 -or $Repetitions -ne 1 -or
+         $WarmupDuration -ne "2m" -or $SteadyDuration -notin @("30m", "60m"))) {
+    throw "Phase 13 requires 150 VUs, one repetition, 2m warmup, and 30m or 60m steady duration"
 }
 if ($Repetitions -lt 1) { throw "Repetitions must be positive" }
 if ($CollectorTailSeconds -lt 10) { throw "CollectorTailSeconds must be at least 10" }
@@ -101,7 +110,7 @@ function Wait-Redis([int]$TimeoutSeconds = 30) {
         if ($LASTEXITCODE -eq 0 -and $pong -eq 'PONG') { return }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
-    throw "Dedicated Phase 11 Redis did not become ready on port $RedisPort"
+    throw "Dedicated $RunPhase Redis did not become ready on port $RedisPort"
 }
 
 function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name) {
@@ -123,7 +132,7 @@ function Start-Backend([int]$ServerPort, [int]$ManagementPort, [string]$Name) {
         '--app.tasks.global-queue-limit=200',
         '--app.tasks.per-user-concurrency=2',
         '--app.observability.external-services-required=false',
-        "--app.observability.environment=phase11-$Name"
+        "--app.observability.environment=$RunPhase-$Name"
     )
     $process = Start-Process -FilePath 'java.exe' -ArgumentList $arguments -PassThru `
         -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
@@ -135,7 +144,7 @@ function Assert-BackendSchema([string]$Name) {
     $expected = "jdbc:mysql://127.0.0.1:3306/$schema"
     $content = Get-Content -Raw -LiteralPath $stdout
     if (-not $content.Contains($expected)) {
-        throw "$Name did not connect to the isolated Phase 11 schema"
+        throw "$Name did not connect to the isolated $RunPhase schema"
     }
 }
 
@@ -148,10 +157,10 @@ $redisPassword = Read-RedisPassword
 $env:MYSQL_PWD = $databasePassword
 $env:REDISCLI_AUTH = $redisPassword
 $env:REDIS_PASSWORD = $redisPassword
-$env:LOAD_TEST_PASSWORD = "P11-" + [Guid]::NewGuid().ToString('N')
+$env:LOAD_TEST_PASSWORD = "P${phaseNumber}-" + [Guid]::NewGuid().ToString('N')
 $env:DB_URL = "jdbc:mysql://127.0.0.1:3306/${schema}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
 $env:SPRING_DATASOURCE_URL = $env:DB_URL
-$redisConfigPath = Join-Path $resultsRoot 'redis-phase11.conf'
+$redisConfigPath = Join-Path $resultsRoot "redis-$RunPhase.conf"
 
 try {
     foreach ($port in @(8080, 8081, 8082, 9091, 9092, $RedisPort)) {
@@ -189,7 +198,7 @@ try {
     Wait-Ready 'http://127.0.0.1:9091/actuator/health/readiness'
     Assert-BackendSchema 'backend-1'
     & (Join-Path $PSScriptRoot 'prepare_data.ps1') -Schema $schema -RunId $runId -MySqlExe $MySqlExe
-    if ($LASTEXITCODE -ne 0) { throw "Phase 11 data preparation failed" }
+    if ($LASTEXITCODE -ne 0) { throw "$RunPhase data preparation failed" }
     $backend2 = Start-Backend 8082 9092 'backend-2'
     $backendProcesses += $backend2
     Wait-Ready 'http://127.0.0.1:9092/actuator/health/readiness'
@@ -201,6 +210,7 @@ try {
     Wait-Ready 'http://127.0.0.1:8080/'
 
     $manifest = [ordered]@{
+        phase = $phaseNumber
         run_id = $runId
         schema = $schema
         redis_database = $RedisDatabase
@@ -219,7 +229,7 @@ try {
         collector_tail_seconds = $CollectorTailSeconds
         topology = 'nginx -> backend-1/backend-2 -> shared MySQL/Redis'
         lane = 'L0_CORE_API'
-        media_execution = 'excluded; DB workers poll every 24h during Phase 11'
+        media_execution = "excluded; DB workers poll every 24h during $RunPhase L0 mixed workload"
         data_baseline = @{ registered_users = 1000; active_users = 200; projects_per_active = 10; historical_tasks_per_active = 50; public_voices = 200 }
         runs = @()
     }
@@ -295,7 +305,7 @@ try {
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     $manifest | Add-Member -NotePropertyName completed_at -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
     [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
-    Write-Output "PHASE11_RESULTS=$resultsRoot"
+    Write-Output "PHASE${phaseNumber}_RESULTS=$resultsRoot"
 } finally {
     if ($nginxStarted) { & cmd.exe /c stop-frontend-nginx.bat | Out-Null }
     foreach ($process in $backendProcesses) {
@@ -304,7 +314,7 @@ try {
         }
     }
     Start-Sleep -Seconds 2
-    if ($schema -match '^fctts_phase11_[a-z0-9_]+$' -and $schema -ne 'zhiyunjiaos') {
+    if ($schema -match '^fctts_phase(11|13)_[a-z0-9_]+$' -and $schema -ne 'zhiyunjiaos') {
         try { Invoke-MySql "DROP DATABASE IF EXISTS ``$schema``;" } catch { Write-Warning $_ }
     }
     try { & $RedisCliExe -h 127.0.0.1 -p $RedisPort -a $redisPassword -n $RedisDatabase --raw FLUSHDB | Out-Null } catch { Write-Warning $_ }

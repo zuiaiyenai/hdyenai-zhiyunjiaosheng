@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($Schema -notmatch '^fctts_phase11_[a-z0-9_]+$' -or $Schema -eq 'zhiyunjiaos') {
+if ($Schema -notmatch '^fctts_phase(11|13)_[a-z0-9_]+$' -or $Schema -eq 'zhiyunjiaos') {
     throw "Refusing to seed unsafe schema name: $Schema"
 }
 if ($RunId -notmatch '^[a-z0-9_-]{4,32}$') {
@@ -23,7 +23,7 @@ if (-not $env:LOAD_TEST_PASSWORD) {
 }
 if ($RegisteredUsers -lt 1000 -or $ActiveUsers -lt 200 -or
         $ProjectsPerActiveUser -lt 10 -or $HistoricalTasksPerActiveUser -lt 50) {
-    throw "Phase 11 data must satisfy the Scenario C baseline"
+    throw "Load-test data must satisfy the Scenario C baseline"
 }
 if (-not (Test-Path -LiteralPath $MySqlExe)) {
     throw "mysql.exe not found: $MySqlExe"
@@ -31,7 +31,8 @@ if (-not (Test-Path -LiteralPath $MySqlExe)) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $localConfig = Join-Path $projectRoot "config\application-local.yml"
-$targetDir = Join-Path $projectRoot "target\phase11-seed"
+$phaseLabel = if ($Schema -match '^fctts_phase13_') { 'phase13' } else { 'phase11' }
+$targetDir = Join-Path $projectRoot "target\${phaseLabel}-seed"
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 
 function Read-LocalScalar([string]$Pattern, [string]$Description) {
@@ -96,18 +97,18 @@ try {
     for ($start = 1; $start -le $RegisteredUsers; $start += 200) {
         $end = [Math]::Min($start + 199, $RegisteredUsers)
         $values = for ($index = $start; $index -le $end; $index++) {
-            $username = "phase11_${RunId}_$($index.ToString('0000'))"
+            $username = "${phaseLabel}_${RunId}_$($index.ToString('0000'))"
             "('$username','$passwordHash',0)"
         }
         $writer.WriteLine("INSERT INTO user(username,password,permission) VALUES $($values -join ',');")
     }
 
     for ($user = 1; $user -le $ActiveUsers; $user++) {
-        $username = "phase11_${RunId}_$($user.ToString('0000'))"
+        $username = "${phaseLabel}_${RunId}_$($user.ToString('0000'))"
         $projectValues = for ($project = 1; $project -le $ProjectsPerActiveUser; $project++) {
             $number = $user * 100 + $project
             $projectId = "00000000-0000-4000-8000-$($number.ToString('000000000000'))"
-            "('$projectId','$username','phase11-project-$project','READY','scalability/$RunId/source-$number.pptx','scalability/$RunId/project-$number','source-$number.pptx','Phase 11 seeded script',1,'longxiao',1.00,1.00,1.00,NOW(6),NOW(6),0)"
+            "('$projectId','$username','${phaseLabel}-project-$project','READY','scalability/$RunId/source-$number.pptx','scalability/$RunId/project-$number','source-$number.pptx','$phaseLabel seeded script',1,'longxiao',1.00,1.00,1.00,NOW(6),NOW(6),0)"
         }
         $writer.WriteLine("INSERT INTO courseware_project(project_id,owner_username,project_name,status,source_path,output_path,file_name,script,revision,voice,speed,pitch,rhythm,created_at,updated_at,lock_version) VALUES $($projectValues -join ',');")
 
@@ -123,7 +124,7 @@ try {
     }
 
     $voiceValues = for ($voice = 1; $voice -le 200; $voice++) {
-        "('phase11-voice-$($voice.ToString('000'))','capacity-test','scalability/$RunId/voice-$voice.wav','audio/wav',1,'phase11-seed')"
+        "('${phaseLabel}-voice-$($voice.ToString('000'))','capacity-test','scalability/$RunId/voice-$voice.wav','audio/wav',1,'${phaseLabel}-seed')"
     }
     $writer.WriteLine("INSERT INTO voice(voice_name,application_scene,file_path,mime_type,public_visible,owner_username) VALUES $($voiceValues -join ',');")
     $writer.WriteLine("SET FOREIGN_KEY_CHECKS=1;")
@@ -137,10 +138,10 @@ try {
     $mysqlSourcePath = $sqlPath.Replace('\', '/')
     & $MySqlExe -h 127.0.0.1 -P 3306 -u root --protocol=tcp --default-character-set=utf8mb4 --batch `
         -e "source $mysqlSourcePath"
-    if ($LASTEXITCODE -ne 0) { throw "MySQL Phase 11 seed failed" }
+    if ($LASTEXITCODE -ne 0) { throw "MySQL load-test seed failed" }
     & $MySqlExe -h 127.0.0.1 -P 3306 -u root --protocol=tcp --batch --skip-column-names `
         -e "SELECT CONCAT((SELECT COUNT(*) FROM ``$Schema``.user),',',(SELECT COUNT(*) FROM ``$Schema``.courseware_project),',',(SELECT COUNT(*) FROM ``$Schema``.async_task),',',(SELECT COUNT(*) FROM ``$Schema``.voice));"
-    if ($LASTEXITCODE -ne 0) { throw "MySQL Phase 11 seed verification failed" }
+    if ($LASTEXITCODE -ne 0) { throw "MySQL load-test seed verification failed" }
 } finally {
     $env:MYSQL_PWD = $previousMySqlPassword
 }

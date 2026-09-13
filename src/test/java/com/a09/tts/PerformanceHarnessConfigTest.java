@@ -34,7 +34,8 @@ class PerformanceHarnessConfigTest {
         String runner = Files.readString(Path.of("performance/run_phase11.ps1"));
         String seed = Files.readString(Path.of("performance/prepare_data.ps1"));
 
-        assertTrue(runner.contains("fctts_phase11_"));
+        assertTrue(runner.contains("$schema = \"fctts_phase${phaseNumber}_$timestamp\""));
+        assertTrue(runner.contains("$RunPhase -eq \"phase11\""));
         assertTrue(runner.contains("$RedisDatabase = 14"));
         assertTrue(runner.contains("$RedisPort = 6380"));
         assertTrue(runner.contains("$env:SPRING_DATASOURCE_URL = $env:DB_URL"));
@@ -54,9 +55,24 @@ class PerformanceHarnessConfigTest {
     }
 
     @Test
-    void collectorCoversEveryRequiredPhaseElevenResource() throws Exception {
+    void phaseThirteenRunnerKeepsTheRequiredSoakProtocol() throws Exception {
+        String runner = Files.readString(Path.of("performance/run_phase11.ps1"));
+        String soakRunner = Files.readString(Path.of("performance/run_phase13.ps1"));
+
+        assertTrue(runner.contains("Phase 13 requires 150 VUs"));
+        assertTrue(soakRunner.contains("-RunPhase phase13"));
+        assertTrue(soakRunner.contains("-UserLevels 150"));
+        assertTrue(soakRunner.contains("-Repetitions 1"));
+        assertTrue(soakRunner.contains("-WarmupDuration \"2m\""));
+        assertTrue(soakRunner.contains("-SteadyDuration \"${DurationMinutes}m\""));
+        assertTrue(soakRunner.contains("-CollectorTailSeconds 300"));
+    }
+
+    @Test
+    void collectorCoversEveryRequiredSoakResource() throws Exception {
         String collector = Files.readString(Path.of("performance/collect_metrics.ps1"));
 
+        assertTrue(collector.contains("fctts_phase(11|13)_"));
         assertTrue(collector.contains("$labels = $Matches[2]"));
         assertTrue(collector.contains("$valueText = $Matches[3]"));
         assertTrue(collector.contains("collector.complete"));
