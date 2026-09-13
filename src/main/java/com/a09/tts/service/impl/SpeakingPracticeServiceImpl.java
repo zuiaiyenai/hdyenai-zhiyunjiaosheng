@@ -104,8 +104,6 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
                                       String sessionId, String language, String username) {
         try {
             String owner = normalizeUsername(username);
-            SpeakingPracticeHistory history = historyByUser.computeIfAbsent(
-                    owner, ignored -> new SpeakingPracticeHistory());
             if (asrService == null) {
                 log.error("ASR 服务未配置，无法进行口语评测");
                 return recognitionFailure(HttpStatus.SERVICE_UNAVAILABLE, "ASR_UNAVAILABLE",
@@ -136,18 +134,22 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
 
             double correctnessRate = accuracy;
 
-            // 记录历史数据（内存）
-            history.addRecord(fluency, pronunciation, accuracy);
-
-            // 持久化到数据库
-            saveHistoryToDB(sessionId, owner, referenceText, userSpeech, fluency, pronunciation,
-                    accuracy, correctnessRate, mistakes, mode, language);
-
-            // 生成折线图数据
-            Map<String, Object> historyData = new HashMap<>();
-            historyData.put("fluency_trend", history.getFluencyScores());
-            historyData.put("pronunciation_trend", history.getPronunciationScores());
-            historyData.put("accuracy_trend", history.getAccuracyScores());
+            Map<String, Object> historyData;
+            if (jdbcTemplate == null) {
+                SpeakingPracticeHistory history = historyByUser.computeIfAbsent(
+                        owner, ignored -> new SpeakingPracticeHistory());
+                history.addRecord(fluency, pronunciation, accuracy);
+                historyData = localHistoryData(history);
+            } else {
+                try {
+                    saveHistoryToDB(sessionId, owner, referenceText, userSpeech, fluency,
+                            pronunciation, accuracy, correctnessRate, mistakes, mode, language);
+                    historyData = loadHistoryData(owner);
+                } catch (Exception exception) {
+                    log.error("口语评测历史读写失败", exception);
+                    return historyUnavailable();
+                }
+            }
 
             // 生成个性化反馈
             String feedback = generateFeedback(fluency, pronunciation, accuracy, mistakes);
@@ -285,20 +287,67 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
     private void saveHistoryToDB(String sessionId, String username, String referenceText, String userText,
                                   double fluency, double pronunciation, double accuracy,
                                   double correctnessRate, String mistakes, String mode, String language) {
-        if (jdbcTemplate == null) return;
-        try {
-            jdbcTemplate.update(
+        int updated = jdbcTemplate.update(
                 "INSERT INTO speaking_history (session_id, username, reference_text, user_text, fluency_score, " +
                 "pronunciation_score, accuracy_score, correctness_rate, mistakes, feedback, mode, language) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 sessionId, username, referenceText, userText, fluency, pronunciation, accuracy,
                 correctnessRate, mistakes, generateFeedback(fluency, pronunciation, accuracy, mistakes),
                 mode, language
-            );
-            log.info("评测历史已保存到数据库, sessionId: {}", sessionId);
-        } catch (Exception e) {
-            log.warn("保存评测历史到数据库失败: {}", e.getMessage());
+        );
+        if (updated != 1) {
+            throw new IllegalStateException("口语评测历史写入数量异常");
         }
+        log.info("评测历史已保存到数据库, sessionId: {}", sessionId);
+    }
+
+    private Map<String, Object> loadHistoryData(String owner) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT fluency_score, pronunciation_score, accuracy_score "
+                        + "FROM speaking_history WHERE username = ? "
+                        + "ORDER BY created_at DESC, history_id DESC LIMIT ?",
+                owner, 5);
+        List<Map<String, Object>> ordered = new ArrayList<>(rows);
+        Collections.reverse(ordered);
+
+        List<Double> fluency = new ArrayList<>(ordered.size());
+        List<Double> pronunciation = new ArrayList<>(ordered.size());
+        List<Double> accuracy = new ArrayList<>(ordered.size());
+        for (Map<String, Object> row : ordered) {
+            fluency.add(score(row, "fluency_score"));
+            pronunciation.add(score(row, "pronunciation_score"));
+            accuracy.add(score(row, "accuracy_score"));
+        }
+
+        Map<String, Object> historyData = new LinkedHashMap<>();
+        historyData.put("fluency_trend", fluency);
+        historyData.put("pronunciation_trend", pronunciation);
+        historyData.put("accuracy_trend", accuracy);
+        return historyData;
+    }
+
+    private Map<String, Object> localHistoryData(SpeakingPracticeHistory history) {
+        Map<String, Object> historyData = new LinkedHashMap<>();
+        historyData.put("fluency_trend", history.getFluencyScores());
+        historyData.put("pronunciation_trend", history.getPronunciationScores());
+        historyData.put("accuracy_trend", history.getAccuracyScores());
+        return historyData;
+    }
+
+    private double score(Map<String, Object> row, String column) {
+        Object value = row.get(column);
+        if (!(value instanceof Number number)) {
+            throw new IllegalStateException("口语评测历史分数字段无效: " + column);
+        }
+        return number.doubleValue();
+    }
+
+    private ResponseEntity<?> historyUnavailable() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", "history_unavailable");
+        body.put("code", "SPEAKING_HISTORY_UNAVAILABLE");
+        body.put("message", "口语评测历史暂时不可用，请稍后重试");
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
 
     /**
@@ -309,9 +358,9 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
         String owner = normalizeUsername(username);
         int page = Pagination.page(pageValue);
         int size = Pagination.size(sizeValue);
-        SpeakingPracticeHistory history = historyByUser.computeIfAbsent(
-                owner, ignored -> new SpeakingPracticeHistory());
         if (jdbcTemplate == null) {
+            SpeakingPracticeHistory history = historyByUser.computeIfAbsent(
+                    owner, ignored -> new SpeakingPracticeHistory());
             return ResponseEntity.ok(Map.of(
                     "history", history, "page", page, "size", size,
                     "hasNext", false, "message", "数据库未连接，仅返回内存数据"));
@@ -337,10 +386,8 @@ public class SpeakingPracticeServiceImpl implements SpeakingPracticeService {
                     "page", result.page(), "size", result.size(),
                     "hasNext", result.hasNext()));
         } catch (Exception e) {
-            log.warn("获取历史记录失败: {}", e.getMessage());
-            return ResponseEntity.ok(Map.of(
-                    "history", history, "page", page, "size", size,
-                    "hasNext", false, "message", e.getMessage()));
+            log.error("获取口语评测历史失败", e);
+            return historyUnavailable();
         }
     }
 

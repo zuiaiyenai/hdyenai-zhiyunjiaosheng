@@ -4,7 +4,7 @@
 >
 > 报告日期：2026-09-13（Asia/Shanghai）
 >
-> 代码范围：`3abeff9`（容量基线）至 `5bbef27`（Phase 14 故障恢复）
+> 代码范围：`3abeff9`（容量基线）至本报告所在提交（含 `38290d9` Phase 15 报告及 completion-audit 纠正）
 >
 > 结论口径：`VERIFIED` 只表示指定提交、主机、拓扑、数据集和协议下的观测结果，不等于生产环境承诺。
 
@@ -64,6 +64,7 @@ Phase 0 基线发现的首要问题不是线程数小，而是正确性和资源
 | 原问题 | 原行为 | 多实例/容量后果 | 后续处理 |
 | --- | --- | --- | --- |
 | JVM 内任务状态 | 去重、每用户活动数、锁和 `Future` 在 `ConcurrentHashMap`；数据库只是快照。 | 两节点可重复接受或执行任务，进程退出后不可恢复。 | Phase 2/5 改成 MySQL 原子状态和可恢复 worker queue。 |
+| JVM 内口语趋势 | 明细写入 MySQL，但响应趋势和数据库异常 fallback 仍读取 `historyByUser`。 | 两节点返回不同趋势，重启后趋势丢失，数据库故障被节点本地成功掩盖。 | Completion audit 改为 DB 模式从 MySQL 最近 5 条记录重建趋势，DB 读写失败稳定返回 503；本地 Map 仅保留给 nodb 演示。 |
 | 节点本地永久文件 | 课件、视频、字幕、笔记等直接使用 `Path/Files`。 | 请求换节点后文件不可见，节点损坏可能丢失资产。 | Phase 3 迁移到对象存储与元数据目录。 |
 | 同步重任务占 HTTP 生命周期 | ASR、TTS、Moonshot、FFmpeg 等长调用与请求线程耦合。 | 慢依赖会放大 Tomcat、连接和 heap 压力。 | Phase 4 改为 `202 + taskId + polling`。 |
 | 无 durable worker | 提交时捕获 JVM lambda，启动时将活动任务直接失败。 | 发布或崩溃会丢执行能力，另一节点无法接管。 | Phase 5 保存 JSON payload、claim token、heartbeat、retry、stale recovery。 |
@@ -103,6 +104,7 @@ Nginx least_conn + retry
   |                           \
   +------> backend-2 ----------+--> shared MySQL
                                |      - business source of truth
+                               |      - speaking history / trend
                                |      - atomic task admission
                                |      - durable worker queue / CAS
                                |
@@ -124,10 +126,11 @@ Nginx least_conn + retry
 ## 6. 单实例问题如何解决
 
 1. **任务正确性进入 MySQL。** 活动幂等唯一索引、每用户 slot、全局 admission lock、原子 claim 和带 `worker_id` 的终态条件更新取代 JVM Map 作为正确性来源。
-2. **课件写入使用数据库乐观锁。** `courseware_project.lock_version` 和 CAS 更新保证同一版本只有一个写者成功，冲突返回 409。
-3. **永久文件进入对象存储。** 数据库记录 provider、bucket、key、大小、checksum、owner；业务不再依赖某个节点的绝对路径。
-4. **长任务脱离 HTTP。** 请求只完成鉴权、校验、暂存和有界准入，返回 202；worker 在响应后执行并持久化结果。
-5. **入口变为双实例。** Nginx `least_conn` 分配普通 HTTP 和 WebSocket 握手，并对连接失败、超时及 502/503/504 尝试另一 upstream。
+2. **口语历史和趋势进入 MySQL。** DB 模式先写入 `speaking_history`，再按 `created_at DESC, history_id DESC` 有界读取最近 5 条并恢复为时间正序；DB 读写失败返回 `503 / SPEAKING_HISTORY_UNAVAILABLE`，不回退到节点 Map。
+3. **课件写入使用数据库乐观锁。** `courseware_project.lock_version` 和 CAS 更新保证同一版本只有一个写者成功，冲突返回 409。
+4. **永久文件进入对象存储。** 数据库记录 provider、bucket、key、大小、checksum、owner；业务不再依赖某个节点的绝对路径。
+5. **长任务脱离 HTTP。** 请求只完成鉴权、校验、暂存和有界准入，返回 202；worker 在响应后执行并持久化结果。
+6. **入口变为双实例。** Nginx `least_conn` 分配普通 HTTP 和 WebSocket 握手，并对连接失败、超时及 502/503/504 尝试另一 upstream。
 
 当前仍是“同一主机双实例”，因此已经解决单 JVM 正确性，但没有证明跨可用区、跨主机网络或基础设施 HA。
 
@@ -142,6 +145,7 @@ Nginx least_conn + retry
 | worker 所有权 | 原子 claim + 唯一 `worker_id` token + heartbeat。 | 双 worker 单次领取、worker crash 后 stale recovery。 | 外部调用完成后、SUCCESS 前崩溃可能重做。 |
 | 课件写入 | `lock_version` CAS。 | 并发结果严格 200/409，revision 只加 1。 | 需要滚动升级时保证旧节点停止写入。 |
 | 缓存 | MySQL 为事实源，Redis cache-aside；写路径驱逐缓存。 | 跨实例写后另一实例 miss 并看到新值。 | Redis 故障时回源压力需要生产容量验证。 |
+| 口语历史/趋势 | DB 模式写入 MySQL 后有界查询同用户最近 5 条；失败不读取节点 Map。 | 5 项定向测试验证共享历史重建、DB 读写失败 503，以及原 ASR 失败语义。 | 本纠正未重新执行双节点 live 口语请求，只能声明代码与测试级 `VERIFIED`。 |
 | WebSocket | 握手负载均衡，TCP 建立后自然固定在节点。 | 10 次握手 5/5。 | 节点故障时连接不能迁移，客户端必须重连。 |
 
 来源：[Worker Queue 模型](WORKER_QUEUE_MODEL.md)、[Backpressure](BACKPRESSURE.md)、[多实例验证](MULTI_INSTANCE.md)、[Phase 14 故障报告](../performance/PHASE14_FAILURE_TESTS.md)。
@@ -346,12 +350,14 @@ MySQL 故障窗出现 17 次 Hikari 约 2 秒获取超时、26 次 worker loop f
 2. **共享 GPT-SoVITS 缺少跨实例全局准入。** 当前 semaphore 是每 JVM；两个 backend 各 1 仍可能向同一模型发 2 个并发，而实测安全值是整机/模型 1。
 3. **真实 FunASR 与完整视频换声未压测。** 当前只能证明 HTTP 契约超时/重试，不知道 ASR safe concurrency，也不知道 ASR+TTS+FFmpeg+OSS 串联后的瓶颈和队列等待。
 4. **OSS 只有正确性验证。** 没有 1/10/20/50 MiB 上传下载、慢客户端、吞吐、失败恢复或区域网络延迟证据；默认 provider 还是 local，部署配置必须显式选择 OSS。
-5. **基础设施仍是单点。** 两个 backend 共享同一 MySQL、Redis、主机和外部模型；未验证 Redis HA、MySQL HA、跨主机网络或可用区故障。
-6. **登录/媒体未进入同一 soak。** 30 分钟测试关闭媒体 worker，只覆盖 L0；60 分钟以上、真实 streaming/WebSocket 和文件 IO 未验证。
-7. **任务队列参数未按等待 SLO 校准。** 全局 200、每用户 2 和 admission 单行锁是正确性/保护机制，不是已证明的吞吐或等待目标。
-8. **数据库故障会产生日志风暴。** 需要 worker DB 错误指数退避、jitter、熔断/短路和日志限频；还需在生产流量下验证池恢复。
-9. **查询仍有数据规模边界。** offset 深分页、包含搜索、voice-note 正文 N 次对象读取和 revision 正文体积需要真实长期数据分布验证。
-10. **故障样本不足。** 每类仅一次，无法给恢复时间 p95/p99；没有磁盘满、网络分区、半开连接和复合故障。
+5. **待清理文件队列没有原子领取。** `pending_file_cleanup` 由每个实例直接 `SELECT ... LIMIT` 后删除或增加 attempts；两个 scheduler 可能同时处理同一记录。对象删除通常幂等，但失败次数、日志和外部请求会重复，尚未达到多实例 worker 所有权语义。
+6. **旧视频响应仍放大 JVM heap。** `VideoVoiceSwapServiceImpl.serveFile` 使用 `Files.readAllBytes` 返回 `ResponseEntity<byte[]>`；大视频或并发下载会产生大对象和 GC/OOM 风险，尚未改为流式响应或对象存储直签下载。
+7. **基础设施仍是单点。** 两个 backend 共享同一 MySQL、Redis、主机和外部模型；未验证 Redis HA、MySQL HA、跨主机网络或可用区故障。
+8. **登录/媒体未进入同一 soak。** 30 分钟测试关闭媒体 worker，只覆盖 L0；60 分钟以上、真实 streaming/WebSocket 和文件 IO 未验证。
+9. **任务队列参数未按等待 SLO 校准。** 全局 200、每用户 2 和 admission 单行锁是正确性/保护机制，不是已证明的吞吐或等待目标。
+10. **数据库故障会产生日志风暴。** 需要 worker DB 错误指数退避、jitter、熔断/短路和日志限频；还需在生产流量下验证池恢复。
+11. **查询仍有数据规模边界。** offset 深分页、包含搜索、voice-note 正文 N 次对象读取和 revision 正文体积需要真实长期数据分布验证。
+12. **故障样本不足。** 每类仅一次，无法给恢复时间 p95/p99；没有磁盘满、网络分区、半开连接和复合故障。
 
 ## 20. Scaling roadmap
 
@@ -363,6 +369,8 @@ MySQL 故障窗出现 17 次 Hikari 约 2 秒获取超时、26 次 worker loop f
 | P0 | 校准 task queue。 | 按任务类型记录 arrival、queue wait、service time、完成率；全局/用户上限由等待 SLO 和恢复预算反推。 |
 | P1 | 真实 FunASR、完整视频换声和课件媒体链路 1→2→4→8 压测。 | 分别给出 safe concurrency、吞吐、p50/p95/p99、失败/重试、CPU/RAM/GPU/磁盘和残留对象。 |
 | P1 | L1 OSS/文件与 WebSocket/streaming 测试。 | 多文件大小、慢客户端、断连、active streams/connections、首包和清理均有原始证据。 |
+| P1 | 为 `pending_file_cleanup` 增加原子 claim、owner token 和 stale recovery。 | 双 scheduler 对同一 cleanup 记录只有一个 owner；崩溃后可回收；状态更新必须匹配 owner。 |
+| P1 | 移除视频 `readAllBytes` 返回路径。 | 大视频通过流式响应或对象存储直签 URL 下载；并发下载期间 heap 增量有界，并验证慢客户端和断连清理。 |
 | P1 | 在目标 Linux/云主机重复 Phase 11–14。 | 绑定实例规格、网络、真实 MySQL/Redis/OSS/模型；至少 60 分钟 soak；每类故障多轮形成恢复分布。 |
 | P1 | MySQL/Redis 故障退避与 HA。 | 无日志风暴；连接等待有界；主从/哨兵或托管 HA 切换后正确性和延迟达到明确 SLO。 |
 | P2 | API 与媒体 worker 分离部署，按资源池扩容。 | API 扩容不放大共享 GPU 并发；worker 按 TTS/ASR/FFmpeg 队列独立扩容和限额。 |
@@ -370,7 +378,7 @@ MySQL 故障窗出现 17 次 Hikari 约 2 秒获取超时、26 次 worker loop f
 
 扩容顺序必须保持“先正确性与全局准入，再加实例”。直接增加 backend 会线性放大 Hikari 连接数和每 JVM semaphore，不会自动增加共享 GPU、MySQL 或 Redis 的安全容量。
 
-## 21. Phase 0–14 交付映射
+## 21. Phase 0–15 交付映射
 
 | Phase | commit | 主要结果 |
 | ---: | --- | --- |
@@ -389,6 +397,8 @@ MySQL 故障窗出现 17 次 Hikari 约 2 秒获取超时、26 次 worker loop f
 | 12 | `cb9307f` | GPT-SoVITS 与 FFmpeg 安全并发。 |
 | 13 | `3583e0e` | 150 VU、30 分钟 soak。 |
 | 14 | `5bbef27` | 依赖、backend 与 worker 故障恢复。 |
+| 15 | `38290d9` | 发布最终容量报告并给出分层结论。 |
+| Completion audit | 本报告所在提交 | 口语历史/趋势移除 DB 模式下最后的节点 Map 正确性依赖，并补齐失败语义与定向测试。 |
 
 这些提交构成一条可审计工程链，但每个历史阶段的 `VERIFIED` 都只适用于该阶段声明的范围。最终容量数字以 Phase 11–14 聚合 JSON 为准。
 
