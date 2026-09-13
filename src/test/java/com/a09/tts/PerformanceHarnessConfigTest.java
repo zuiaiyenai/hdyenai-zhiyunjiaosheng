@@ -42,6 +42,8 @@ class PerformanceHarnessConfigTest {
         assertTrue(runner.contains("3306/${schema}?useUnicode=true"));
         assertTrue(runner.contains("Assert-BackendSchema 'backend-1'"));
         assertTrue(runner.contains("--server.tomcat.mbeanregistry.enabled=true"));
+        assertTrue(runner.contains("Start-Process -FilePath $javaExe"));
+        assertTrue(runner.contains("java_version = (& cmd.exe"));
         assertTrue(runner.contains("'appendonly no'"));
         assertTrue(runner.contains("Remove-Item -LiteralPath $redisConfigPath"));
         assertTrue(runner.contains("Start-Backend 8081 9091 'backend-1'"));

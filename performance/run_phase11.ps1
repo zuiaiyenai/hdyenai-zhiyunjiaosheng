@@ -225,7 +225,7 @@ try {
         started_at = [DateTime]::UtcNow.ToString('o')
         k6_version = (& $K6Exe version | Out-String).Trim()
         java_executable = $javaExe
-        java_version = (& $javaExe -version 2>&1 | Out-String).Trim()
+        java_version = (& cmd.exe /d /s /c "`"$javaExe`" -version 2>&1" | Out-String).Trim()
         mysql_version = (Invoke-MySql 'SELECT VERSION();' | Out-String).Trim()
         user_levels = $UserLevels
         repetitions = $Repetitions
