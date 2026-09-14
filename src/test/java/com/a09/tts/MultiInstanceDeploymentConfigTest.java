@@ -29,7 +29,10 @@ class MultiInstanceDeploymentConfigTest {
                 "ALIYUN_OSS_ENDPOINT", "ALIYUN_OSS_BUCKET",
                 "ALIYUN_OSS_ACCESS_KEY_ID", "ALIYUN_OSS_ACCESS_KEY_SECRET",
                 "TASK_WORKER_COUNT", "TASK_PER_USER_CONCURRENCY",
-                "TASK_GLOBAL_QUEUE_LIMIT", "TASK_ADMISSION_RETRY_AFTER")) {
+                "TASK_GLOBAL_QUEUE_LIMIT", "TASK_ADMISSION_RETRY_AFTER",
+                "ENDPOINT_RATE_LIMIT_ENABLED", "ENDPOINT_RATE_LIMIT_MAX_REQUESTS",
+                "ENDPOINT_RATE_LIMIT_WINDOW", "ENDPOINT_RATE_LIMIT_FALLBACK_MAX_ENTRIES")) {
+            assertTrue(firstEnvironment.containsKey(property), property + " missing");
             assertEquals(firstEnvironment.get(property), secondEnvironment.get(property), property);
         }
         assertEquals("true", firstEnvironment.get("REDIS_ENABLED"));
