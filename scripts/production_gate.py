@@ -314,8 +314,9 @@ def collect_resource_sample(args):
         errors.append("prometheus:" + type(error).__name__)
 
     if getattr(args, "compose_project_name", None):
+        backend_service = getattr(args, "backend_service", "backend")
         try:
-            container_id = compose_command(args, "ps", "--quiet", "backend")
+            container_id = compose_command(args, "ps", "--quiet", backend_service)
             sample["dockerStats"] = json.loads(subprocess.run(
                 ["docker", "stats", "--no-stream", "--format", "{{json .}}", container_id],
                 check=True,
@@ -337,7 +338,7 @@ def collect_resource_sample(args):
             ),
         }
         for key, command in commands.items():
-            service = "mysql" if key == "pendingCleanupCount" else "backend"
+            service = "mysql" if key == "pendingCleanupCount" else backend_service
             try:
                 sample[key] = int(compose_command(
                     args, "exec", "-T", service, "sh", "-c", command
@@ -345,7 +346,7 @@ def collect_resource_sample(args):
             except Exception as error:
                 errors.append(key + ":" + type(error).__name__)
         try:
-            backend_logs = compose_command(args, "logs", "--no-color", "backend")
+            backend_logs = compose_command(args, "logs", "--no-color", backend_service)
             sample["backendLogBytes"] = len(backend_logs.encode("utf-8"))
             sample["redisErrorLines"] = sum(
                 1 for line in backend_logs.splitlines()
@@ -444,6 +445,7 @@ def build_parser():
     stability.add_argument("--resource-sample-interval", type=int, default=60)
     stability.add_argument("--compose-project-name")
     stability.add_argument("--compose-file", default="docker-compose.yml")
+    stability.add_argument("--backend-service", default="backend")
     stability.add_argument("--output")
     return parser
 

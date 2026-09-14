@@ -129,6 +129,13 @@ http_server_requests_seconds_count{uri="/api/tasks/123"} 9
         self.assertEqual([], production_gate.validate_resource_samples([sample, sample]))
         self.assertTrue(production_gate.validate_resource_samples([sample]))
 
+    def test_stability_parser_accepts_multi_instance_backend_service(self):
+        args = production_gate.build_parser().parse_args(
+            ["stability", "--backend-service", "backend-1"]
+        )
+
+        self.assertEqual("backend-1", args.backend_service)
+
     def test_stability_scheduler_executes_declared_mix(self):
         class InlineExecutor:
             def __init__(self, **_kwargs):

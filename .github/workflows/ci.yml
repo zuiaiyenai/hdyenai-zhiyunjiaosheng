@@ -107,8 +107,8 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/readiness
           curl --fail --silent --show-error http://127.0.0.1:9091/actuator/health/redis
           curl --fail --silent --show-error http://127.0.0.1:8081/ > /dev/null
-          docker compose exec -T backend ffmpeg -version
-          docker compose exec -T backend ffprobe -version
+          docker compose exec -T backend-1 ffmpeg -version
+          docker compose exec -T backend-1 ffprobe -version
       - name: Run Redis and MySQL outage/recovery drill
         run: >-
           python scripts/docker_fault_drill.py
@@ -139,11 +139,12 @@ jobs:
               --require-resource-metrics \
               --resource-sample-interval 60 \
               --compose-project-name "$COMPOSE_PROJECT_NAME" \
+              --backend-service backend-1 \
               --output artifacts/phase11/redis-mixed.json
       - name: Restart backend and verify persisted DB state
         shell: bash
         run: |
-          docker compose restart backend
+          docker compose restart backend-1
           timeout 240 bash -c 'until curl --fail --silent http://127.0.0.1:9091/actuator/health/readiness; do sleep 5; done'
           python scripts/production_gate.py stability \
             --scenario voices \
@@ -163,7 +164,7 @@ jobs:
             *) echo "Refusing to destroy non-dedicated schema: $DB_NAME" >&2; exit 1 ;;
           esac
 
-          docker compose stop backend
+          docker compose stop backend-1
           fixture_project="$(python -c 'import uuid; print(uuid.uuid4())')"
           fixture_task="$(python -c 'import uuid; print(uuid.uuid4())')"
           fixture_sql="INSERT INTO voice
@@ -226,7 +227,7 @@ jobs:
           diff --unified artifacts/phase11/backup-counts-before.tsv \
             artifacts/phase11/backup-counts-restored.tsv
 
-          docker compose start backend
+          docker compose start backend-1
           timeout 240 bash -c \
             'until curl --fail --silent http://127.0.0.1:9091/actuator/health/readiness; do sleep 5; done'
           login_status="$(curl --silent --output artifacts/phase11/post-restore-login.json \
@@ -251,7 +252,7 @@ jobs:
           docker compose --profile observability ps --all > artifacts/phase11/compose-ps.txt || true
           docker compose --profile observability images > artifacts/phase11/compose-images.txt || true
           docker compose --profile observability logs --no-color > artifacts/phase11/compose.log || true
-          docker compose logs --no-color backend > artifacts/phase11/backend.log || true
+          docker compose logs --no-color backend-1 > artifacts/phase11/backend.log || true
           container_ids="$(docker compose --profile observability ps --all --quiet || true)"
           if [ -n "$container_ids" ]; then
             docker inspect $container_ids > artifacts/phase11/container-inspect.json || true
