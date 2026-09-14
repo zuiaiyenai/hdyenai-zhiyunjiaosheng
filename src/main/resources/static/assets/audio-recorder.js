@@ -242,7 +242,10 @@
         if(this.live&&this.socket&&this.socket.readyState===WebSocket.OPEN){
           this.socket.send(JSON.stringify({type:"stop"}));
           this.status.textContent=reason||"正在生成最终识别结果…";
-          this.socketCloseTimer=window.setTimeout(()=>this.closeSocket(),5000);
+          this.socketCloseTimer=window.setTimeout(()=>{
+            this.closeSocket();
+            this.fallbackToFileAsr(new Error("实时识别未返回最终结果"));
+          },5000);
         }else{
           this.status.textContent=reason||"录音完成，可试听或提交";
         }
@@ -299,8 +302,12 @@
           }else if(message.type==="complete"){
             this.finalText=message.text||this.finalText;
             this.partialText="";
-            this.showTranscript();
-            this.status.textContent="实时识别完成，录音也可再次提交";
+            const hasSpeech=!!this.finalText.trim();
+            this.showTranscript(hasSpeech?"实时识别完成":"未识别到有效语音");
+            this.status.textContent=hasSpeech
+              ?"实时识别完成，录音也可再次提交"
+              :"实时识别完成，但未识别到有效语音";
+            this.live=false;
             this.closeSocket();
           }else if(message.type==="error"){
             const error=new Error(message.message||"实时识别失败");
@@ -316,6 +323,7 @@
         socket.onclose=()=>{
           window.clearTimeout(timeout);
           if(!settled){settled=true;reject(new Error("实时识别连接已关闭"))}
+          else if(this.recording)this.failLive(new Error("实时识别连接意外关闭"));
         };
       });
     }
@@ -333,16 +341,58 @@
       if(this.liveFailing)return;
       this.liveFailing=true;
       const message=this.message(error);
-      if(this.recording)await this.stop(message);
+      const shouldFallback=this.recording||(this.live&&!!this.file);
+      this.live=false;
       this.closeSocket();
-      this.status.textContent=message;
+      if(this.recording)await this.stop("实时识别已停止，录音已保存");
+      if(shouldFallback&&this.file)await this.fallbackToFileAsr(error);
+      else{
+        this.status.textContent=message;
+        this.showTranscript("实时识别失败");
+      }
       this.liveFailing=false;
     }
 
-    showTranscript(){
+    async fallbackToFileAsr(error){
+      if(!this.file||this.fallbackInProgress)return;
+      this.fallbackInProgress=true;
+      this.live=false;
+      const fallback=window.zyjsSubmitAndWait;
+      if(typeof fallback!=="function"){
+        this.status.textContent=this.message(error)+"；本地降级不可用";
+        this.showTranscript("实时识别失败，本地降级不可用");
+        this.fallbackInProgress=false;
+        return;
+      }
+      this.status.textContent="实时识别失败，正在使用本地 FunASR 识别已保存录音……";
+      this.showTranscript("正在使用本地 FunASR 降级识别");
+      try{
+        const form=new FormData();
+        form.append("file",this.file);
+        form.append("language","zh");
+        const response=await fallback("/asr/transcribe",form,()=>{
+          this.status.textContent="本地 FunASR 降级任务正在执行……";
+        });
+        const data=await response.json();
+        this.finalText=(data.text||"").trim();
+        this.partialText="";
+        const hasSpeech=!!this.finalText;
+        this.showTranscript(hasSpeech?"本地 FunASR 降级识别完成":"未识别到有效语音");
+        this.status.textContent=hasSpeech
+          ?"实时识别失败，已由本地 FunASR 完成识别"
+          :"本地 FunASR 未识别到有效语音";
+      }catch(fallbackError){
+        this.status.textContent=this.message(error)+"；本地降级失败："+this.message(fallbackError);
+        this.showTranscript("实时识别与本地降级均失败");
+      }finally{
+        this.fallbackInProgress=false;
+      }
+    }
+
+    showTranscript(state){
       const panel=this.input.closest("article,.panel,section");
       const result=panel&&panel.querySelector("pre.result");
-      if(result)result.textContent="识别文本："+this.finalText+this.partialText+"\n状态：实时识别中";
+      if(result)result.textContent="识别文本："+this.finalText+this.partialText+"\n状态："+(state||"实时识别中");
     }
 
     updateClock(){

@@ -75,6 +75,32 @@ class AsyncTaskServiceTest {
     }
 
     @Test
+    void deterministicArgumentFailureIsNotRetriedAndKeepsSafeMessage() throws Exception {
+        InMemoryTaskRepository repository = new InMemoryTaskRepository();
+        AtomicInteger executions = new AtomicInteger();
+        TaskDispatcher dispatcher = dispatcher(task -> {
+            executions.incrementAndGet();
+            throw new IllegalArgumentException("找不到音色参考文件：longcheng");
+        });
+        AsyncTaskService service = service(repository, dispatcher, 1,
+                Duration.ofSeconds(2), Duration.ofMillis(20), 2,
+                new SimpleMeterRegistry());
+        try {
+            TaskSubmission submission = service.submit(
+                    "alice", "VIDEO_VOICE_SWAP", null, Map.of("voice", "longcheng"), 3);
+            TaskRecord completed = awaitTerminal(service, submission.taskId(), "alice");
+
+            assertEquals(TaskStatus.FAILED, completed.status());
+            assertEquals(1, completed.attempts());
+            assertEquals(1, executions.get());
+            assertEquals("TASK_INVALID_ARGUMENT", completed.errorCode());
+            assertEquals("找不到音色参考文件：longcheng", completed.errorMessage());
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void recoversStaleClaimAndFailsExhaustedClaim() throws Exception {
         InMemoryTaskRepository repository = new InMemoryTaskRepository();
         Instant now = Instant.now();

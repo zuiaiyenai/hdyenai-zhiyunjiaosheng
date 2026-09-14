@@ -68,14 +68,14 @@ public class DialectTTSController {
     }
 
     @PostMapping(value = "/stream", produces = "audio/mpeg")
-    public ResponseEntity<?> streamDialect(@RequestBody Map<String, Object> request) {
+    public ResponseEntity<StreamingResponseBody> streamDialect(@RequestBody Map<String, Object> request) {
         String text = request.get("text") instanceof String value ? value.trim() : "";
         String voiceId = request.get("voice") instanceof String value ? value.trim() : "cuijie";
         if (text.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("code", 400, "msg", "文本不能为空"));
+            throw new IllegalArgumentException("文本不能为空");
         }
         if (text.length() > 5000) {
-            return ResponseEntity.badRequest().body(Map.of("code", 400, "msg", "单次合成文本不能超过 5000 字"));
+            throw new IllegalArgumentException("单次合成文本不能超过 5000 字");
         }
 
         try {

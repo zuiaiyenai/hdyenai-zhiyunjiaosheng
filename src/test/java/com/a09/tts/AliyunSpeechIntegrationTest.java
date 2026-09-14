@@ -4,7 +4,10 @@ import com.a09.tts.controller.DialectTTSController;
 import com.a09.tts.service.AliyunSpeechService;
 import com.a09.tts.service.DialectVoiceCatalog;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.ByteArrayOutputStream;
@@ -17,6 +20,12 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
 class AliyunSpeechIntegrationTest {
     @Test
@@ -81,5 +90,26 @@ class AliyunSpeechIntegrationTest {
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
         assertThat(response.getHeaders().getContentType().toString()).isEqualTo("audio/mpeg");
         assertThat(audio.toByteArray()).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    void dialectStreamIsHandledBySpringMvc() throws Exception {
+        AliyunSpeechService service = mock(AliyunSpeechService.class);
+        doAnswer(invocation -> {
+            invocation.<java.io.OutputStream>getArgument(2).write(new byte[]{1, 2, 3});
+            return null;
+        }).when(service).stream(eq("咱们唠嗑更顺溜"), eq("cuijie"), any());
+        MockMvc mockMvc = standaloneSetup(new DialectTTSController(service)).build();
+
+        MvcResult result = mockMvc.perform(post("/dialect/stream")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"我们聊天更顺畅\",\"voice\":\"cuijie\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(result))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("audio/mpeg"))
+                .andExpect(content().bytes(new byte[]{1, 2, 3}));
     }
 }

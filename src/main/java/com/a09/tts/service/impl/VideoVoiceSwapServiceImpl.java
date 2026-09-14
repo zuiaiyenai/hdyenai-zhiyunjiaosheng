@@ -172,7 +172,8 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
                 videoDuration, audioDuration, audioTempo);
         command.add(ffmpegPath);
         command.addAll(buildMergeCommand(
-                videoPath, newAudioPath, subtitlePath, outputVideoPath, audioTempo));
+                videoPath, newAudioPath, subtitlePath, outputVideoPath,
+                audioTempo, videoDuration));
 
         processRunner.run(command, "视频合成失败");
         log.info("最终视频合成完成: {}", outputVideoPath);
@@ -180,7 +181,7 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
 
     List<String> buildMergeCommand(
             String videoPath, String newAudioPath, String subtitlePath,
-            String outputVideoPath, double audioTempo) {
+            String outputVideoPath, double audioTempo, double videoDuration) {
         List<String> command = new ArrayList<>(List.of(
                 "-hide_banner", "-y",
                 "-i", videoPath,
@@ -192,11 +193,11 @@ public class VideoVoiceSwapServiceImpl implements VideoVoiceSwapService {
         command.addAll(List.of(
                 "-map", "0:v:0",
                 "-map", "1:a:0",
-                "-filter:a", buildAtempoFilter(audioTempo),
+                "-filter:a", buildAtempoFilter(audioTempo) + ",apad",
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
-                "-shortest",
+                "-t", String.format(Locale.ROOT, "%.6f", videoDuration),
                 "-movflags", "+faststart",
                 outputVideoPath));
         return command;

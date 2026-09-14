@@ -275,6 +275,16 @@ public class AsyncTaskService {
             }
             return;
         }
+        IllegalArgumentException argumentFailure = argumentFailure(exception);
+        if (argumentFailure != null) {
+            String message = safeArgumentMessage(argumentFailure.getMessage());
+            if (repository.completeFailure(latest.id(), latest.workerId(),
+                    "TASK_INVALID_ARGUMENT", message, Instant.now())) {
+                log.warn("任务参数或配置无效，不再重试: taskId={}, message={}",
+                        latest.id(), message);
+            }
+            return;
+        }
         String code = accepting.get() ? "TASK_EXECUTION_FAILED" : "WORKER_SHUTDOWN";
         if (latest.attempts() < latest.maxAttempts()) {
             Instant availableAt = accepting.get()
@@ -292,6 +302,28 @@ public class AsyncTaskService {
             log.error("任务执行失败且重试次数已耗尽: taskId={}, attempts={}",
                     latest.id(), latest.attempts(), exception);
         }
+    }
+
+    private IllegalArgumentException argumentFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof IllegalArgumentException argumentException) {
+                return argumentException;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private String safeArgumentMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "任务参数或配置无效";
+        }
+        String normalized = message.replaceAll("[\\r\\n\\t]+", " ").trim();
+        return normalized.length() > 200 ? normalized.substring(0, 200) : normalized;
     }
 
     private Duration backoff(int attempts) {

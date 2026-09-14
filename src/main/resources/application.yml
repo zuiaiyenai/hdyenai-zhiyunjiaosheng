@@ -1,6 +1,9 @@
 spring:
   application:
     name: tts
+  mvc:
+    async:
+      request-timeout: "30m"
   profiles:
     default: nodb
   data:
@@ -140,6 +143,7 @@ tts:
   api:
     url: "${TTS_API_URL:http://127.0.0.1:9880/tts}"
     timeout: "${TTS_API_TIMEOUT:30s}"
+    streaming-idle-timeout: "${TTS_STREAMING_IDLE_TIMEOUT:2m}"
   sample-library-path: "${TTS_SAMPLE_LIBRARY_PATH:D:/BaiduNetdiskDownload/GPT-SoVITS-v2-240821/Sound_sample_library}"
   default-voice: "${TTS_DEFAULT_VOICE:样本}"
   english-voice: "${TTS_ENGLISH_VOICE:Katherine_Maher_reference}"

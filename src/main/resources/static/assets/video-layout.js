@@ -319,6 +319,27 @@
     const includeSubtitles=page.querySelector("#video-swap-include-subtitles");
     const subtitleEditor=page.querySelector("#video-swap-subtitles");
     let transcript="";
+    let codecWarning="";
+    async function detectVideoCodec(file){
+      const chunkSize=4*1024*1024;
+      const chunks=[await file.slice(0,Math.min(file.size,chunkSize)).arrayBuffer()];
+      if(file.size>chunkSize)chunks.push(await file.slice(Math.max(0,file.size-chunkSize)).arrayBuffer());
+      const decoder=new TextDecoder("latin1");
+      const signature=chunks.map(chunk=>decoder.decode(chunk)).join("");
+      const codecs=[
+        {markers:["avc1","avc3"],name:"H.264",h264:true},
+        {markers:["mp4v"],name:"MPEG-4 Part 2",h264:false},
+        {markers:["hvc1","hev1"],name:"H.265/HEVC",h264:false},
+        {markers:["av01"],name:"AV1",h264:false},
+        {markers:["vp09","V_VP9"],name:"VP9",h264:false},
+        {markers:["vp08","V_VP8"],name:"VP8",h264:false},
+        {markers:["V_AV1"],name:"AV1",h264:false},
+        {markers:["apch","apcn","apcs","apco","ap4h"],name:"Apple ProRes",h264:false}
+      ];
+      const detected=codecs.find(codec=>codec.markers.some(marker=>signature.includes(marker)));
+      if(detected)return detected;
+      return /\.webm$/i.test(file.name)?{name:"WebM",h264:false}:null;
+    }
     function clearSubtitleTrack(){
       player.querySelectorAll("track[data-video-subtitles]").forEach(track=>track.remove());
       if(subtitleObjectUrl)URL.revokeObjectURL(subtitleObjectUrl);
@@ -357,9 +378,21 @@
       updateSubtitlePreview();
     });
     subtitleEditor.addEventListener("input",updateSubtitlePreview);
-    fileInput.addEventListener("change",()=>{
+    fileInput.addEventListener("change",async()=>{
       const file=fileInput.files&&fileInput.files[0];
       if(!file)return;
+      status.className="video-swap-status";
+      status.textContent="正在检测视频编码……";
+      codecWarning="";
+      try{
+        const codec=await detectVideoCodec(file);
+        if(fileInput.files?.[0]!==file)return;
+        if(codec&&!codec.h264){
+          codecWarning="检测到 "+codec.name+" 视频。浏览器可能只能播放声音、无法显示画面；换声成功后将输出 H.264 视频。";
+        }
+      }catch{
+        codecWarning="无法确认视频编码；如果只能听见声音，请先转换为 H.264 MP4。";
+      }
       if(objectUrl)URL.revokeObjectURL(objectUrl);
       objectUrl=URL.createObjectURL(file);
       player.src=objectUrl;
@@ -370,8 +403,13 @@
       },{once:true});
       player.addEventListener("loadeddata",()=>{
         if(player.src!==previewUrl)return;
-        status.className="video-swap-status";
-        status.textContent="原视频已加载，可直接预览";
+        if(codecWarning||!player.videoWidth){
+          status.className="video-swap-status error";
+          status.textContent=codecWarning||"浏览器无法解码视频画面，请转换为 H.264 MP4 后预览";
+        }else{
+          status.className="video-swap-status";
+          status.textContent="原视频已加载，可直接预览";
+        }
       },{once:true});
       player.addEventListener("error",()=>{
         if(player.src!==previewUrl)return;
@@ -385,8 +423,8 @@
       clearSubtitleTrack();
       download.disabled=true;
       download.removeAttribute("data-url");
-      status.className="video-swap-status";
-      status.textContent="已选择："+file.name;
+      status.className=codecWarning?"video-swap-status error":"video-swap-status";
+      status.textContent=codecWarning||("已选择："+file.name);
     });
     analyze.addEventListener("click",async()=>{
       const file=fileInput.files&&fileInput.files[0];

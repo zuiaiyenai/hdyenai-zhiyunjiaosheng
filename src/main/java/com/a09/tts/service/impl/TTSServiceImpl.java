@@ -40,11 +40,15 @@ public class TTSServiceImpl implements TTSService {
     private static final Map<String, String> REFERENCE_PROMPTS = Map.of(
             "红豆生南国", "红豆生南国，春来发几枝。",
             "样本", "你好，这里是智韵教声。",
+            "longcheng", "大家好，这是沉稳清晰的男生音色，适合知识讲解与课堂旁白。",
             "Katherine_Maher_reference", "Hi, my name is Katherine Maher. I am the executive director of Wikimedia Foundation."
     );
     private final WebClient webClient;
     private final TaskResourceBulkheads bulkheads;
     private final Duration requestTimeout;
+
+    @Value("${tts.api.streaming-idle-timeout:2m}")
+    private Duration streamingIdleTimeout = Duration.ofMinutes(2);
 
     @Value("${tts.api.url}")
     private String apiUrl;
@@ -113,7 +117,7 @@ public class TTSServiceImpl implements TTSService {
                        OutputStream outputStream) throws IOException {
         try (TaskResourceBulkheads.Permit ignored = bulkheads.acquire(TaskResource.TTS)) {
             audioFlux(createRequest(text, voice, speed, pitch, rhythm, true))
-                    .timeout(requestTimeout)
+                    .timeout(streamingIdleTimeout)
                     .doOnNext(buffer -> {
                         try {
                             byte[] bytes = new byte[buffer.readableByteCount()];
@@ -127,7 +131,8 @@ public class TTSServiceImpl implements TTSService {
                         }
                     })
                     .then()
-                    .block(requestTimeout.plusSeconds(1));
+                    // Long text can spend tens of seconds generating the next fragment.
+                    .block();
         } catch (UncheckedIOException exception) {
             throw exception.getCause();
         } catch (ResourceCapacityException exception) {
@@ -162,19 +167,21 @@ public class TTSServiceImpl implements TTSService {
                 Map.entry("aux_ref_audio_paths", List.of()),
                 Map.entry("prompt_lang", reference.promptLanguage()),
                 Map.entry("prompt_text", reference.promptText()),
-                Map.entry("top_k", 5),
-                Map.entry("top_p", 0.9),
-                Map.entry("temperature", 0.8),
+                Map.entry("top_k", streaming ? 20 : 5),
+                Map.entry("top_p", streaming ? 0.6 : 0.9),
+                Map.entry("temperature", streaming ? 0.6 : 0.8),
                 Map.entry("text_split_method", streaming ? "cut5" : "cut0"),
                 Map.entry("batch_size", 1),
                 Map.entry("speed_factor", speed),
-                Map.entry("pitch", pitch),
-                Map.entry("rhythm", rhythm),
                 Map.entry("media_type", "wav"),
                 Map.entry("streaming_mode", streaming),
-                Map.entry("fragment_interval", 0.12),
+                Map.entry("fragment_interval", streaming ? fragmentInterval(rhythm) : 0.12),
                 Map.entry("parallel_infer", true),
                 Map.entry("repetition_penalty", 1.35));
+    }
+
+    private double fragmentInterval(double rhythm) {
+        return Math.max(0.15, Math.min(0.6, 0.3 / rhythm));
     }
 
     private ReferenceVoice resolveReference(String requestedVoice) {

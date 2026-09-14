@@ -1,4 +1,7 @@
 spring:
+  mvc:
+    async:
+      request-timeout: "30m"
   autoconfigure:
     exclude:
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration

@@ -33,14 +33,53 @@ class MediaStreamingArchitectureTest {
     }
 
     @Test
-    void pptUploadUsesMultipartResourceInsteadOfCopyingWholeFile() throws IOException {
+    void pptTextIsExtractedLocallyInsteadOfUploadingTheWholeFile() throws IOException {
         String implementation = source("service/impl/PPTServiceImpl.java");
 
         assertFalse(implementation.contains("file.getBytes()"));
-        assertTrue(implementation.contains("uploadFile(file.getResource()"));
+        assertFalse(implementation.contains("/files"));
+        assertTrue(implementation.contains("new XMLSlideShow(input)"));
+        assertTrue(implementation.contains("new HSLFSlideShow(input)"));
+    }
+
+    @Test
+    void dialectPlayerSubscribesBeforeMediaSourceCanOpen() throws IOException {
+        String player = staticAsset("dialect-stream-player.js");
+
+        int subscribe = player.indexOf("var sourceOpenPromise = once(mediaSource, \"sourceopen\"");
+        int assignSource = player.indexOf("options.audio.src = activeMediaUrl");
+        int fetch = player.indexOf("var response = await fetch");
+
+        assertTrue(subscribe >= 0);
+        assertTrue(subscribe < assignSource);
+        assertTrue(subscribe < fetch);
+    }
+
+    @Test
+    void dialectPlayerTurnsUnauthorizedResponsesIntoLoginGuidance() throws IOException {
+        String player = staticAsset("dialect-stream-player.js");
+
+        assertTrue(player.contains("if (!options.token)"));
+        assertTrue(player.contains("response.status === 401"));
+        assertTrue(player.contains("登录已过期，请重新登录"));
+        assertTrue(player.contains("localStorage.removeItem(\"token\")"));
+        assertTrue(player.contains("localStorage.removeItem(\"role\")"));
+        assertTrue(player.contains("localStorage.removeItem(\"username\")"));
+        assertTrue(player.contains("document.querySelector(\"header .user\")"));
+    }
+
+    @Test
+    void dialectPlayerDoesNotBlockStreamReadingWhilePlaybackIsBuffering() throws IOException {
+        String player = staticAsset("dialect-stream-player.js");
+
+        assertFalse(player.contains("await playPromise"));
     }
 
     private String source(String relativePath) throws IOException {
         return Files.readString(Path.of("src/main/java/com/a09/tts").resolve(relativePath));
+    }
+
+    private String staticAsset(String fileName) throws IOException {
+        return Files.readString(Path.of("src/main/resources/static/assets").resolve(fileName));
     }
 }

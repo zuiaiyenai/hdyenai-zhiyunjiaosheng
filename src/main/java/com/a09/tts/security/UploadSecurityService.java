@@ -1,6 +1,7 @@
 package com.a09.tts.security;
 
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -32,7 +33,7 @@ public class UploadSecurityService {
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(".jpg", ".jpeg", ".png", ".gif");
     private static final Set<String> PRESENTATION_EXTENSIONS = Set.of(".ppt", ".pptx");
     private static final Set<String> VIDEO_EXTENSIONS = Set.of(".mp4", ".mov", ".webm", ".avi");
-    private static final Set<String> TEXT_EXTENSIONS = Set.of(".txt", ".md");
+    private static final Set<String> TEXT_EXTENSIONS = Set.of(".txt", ".md", ".docx");
 
     @Value("${app.upload.audio-max-size:20MB}")
     private org.springframework.util.unit.DataSize audioMaxSize = org.springframework.util.unit.DataSize.ofMegabytes(20);
@@ -81,7 +82,7 @@ public class UploadSecurityService {
             case IMAGE -> validateImage(file);
             case PRESENTATION -> validatePresentation(file, extension);
             case AUDIO -> validateWaveDuration(file, extension);
-            case TEXT -> validateText(file);
+            case TEXT -> validateText(file, extension);
             case VIDEO -> { }
         }
     }
@@ -217,7 +218,14 @@ public class UploadSecurityService {
         }
     }
 
-    private void validateText(MultipartFile file) throws IOException {
+    private void validateText(MultipartFile file, String extension) throws IOException {
+        if (".docx".equals(extension)) {
+            try (XWPFDocument ignored = new XWPFDocument(file.getInputStream())) {
+                return;
+            } catch (Exception exception) {
+                throw new IllegalArgumentException("无法解析 DOCX 文件");
+            }
+        }
         try {
             StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
@@ -229,7 +237,7 @@ public class UploadSecurityService {
     }
 
     private boolean magicMatches(byte[] h, String extension, Type type) {
-        if (type == Type.TEXT) return true;
+        if (type == Type.TEXT && !".docx".equals(extension)) return true;
         if (h.length < 4) return false;
         return switch (extension) {
             case ".wav" -> ascii(h, 0, "RIFF") && h.length >= 12 && ascii(h, 8, "WAVE");
@@ -243,6 +251,7 @@ public class UploadSecurityService {
             case ".png" -> u(h[0]) == 0x89 && ascii(h, 1, "PNG");
             case ".gif" -> ascii(h, 0, "GIF8");
             case ".pptx" -> u(h[0]) == 0x50 && u(h[1]) == 0x4b;
+            case ".docx" -> u(h[0]) == 0x50 && u(h[1]) == 0x4b;
             case ".ppt" -> u(h[0]) == 0xd0 && u(h[1]) == 0xcf && u(h[2]) == 0x11 && u(h[3]) == 0xe0;
             default -> false;
         };
@@ -257,7 +266,8 @@ public class UploadSecurityService {
             case PRESENTATION -> value.equals("application/vnd.ms-powerpoint")
                     || value.equals("application/vnd.openxmlformats-officedocument.presentationml.presentation");
             case VIDEO -> value.startsWith("video/");
-            case TEXT -> value.equals("text/plain") || value.equals("text/markdown");
+            case TEXT -> value.equals("text/plain") || value.equals("text/markdown")
+                    || value.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
         };
     }
 

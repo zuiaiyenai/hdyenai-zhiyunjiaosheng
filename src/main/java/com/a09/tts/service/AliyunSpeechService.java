@@ -13,6 +13,8 @@ import com.aliyuncs.CommonResponse;
 import com.aliyuncs.IAcsClient;
 import com.aliyuncs.http.MethodType;
 import com.aliyuncs.http.ProtocolType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -23,10 +25,14 @@ import java.nio.ByteBuffer;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class AliyunSpeechService {
+    static final long FIRST_AUDIO_TIMEOUT_MILLIS = 15_000;
+    private static final long STREAMING_COMPLETION_TIMEOUT_MILLIS = 300_000;
+    private static final Logger log = LoggerFactory.getLogger(AliyunSpeechService.class);
     private final AliyunNlsCredentials credentials;
 
     @Autowired
@@ -78,10 +84,15 @@ public class AliyunSpeechService {
         credentials.requireNlsConfiguration();
         AtomicReference<String> failure = new AtomicReference<>();
         AtomicReference<IOException> writeFailure = new AtomicReference<>();
-        NlsClient client = credentials.createNlsClient();
+        AtomicBoolean firstAudioReceived = new AtomicBoolean();
+        AtomicBoolean finished = new AtomicBoolean();
+        NlsClient client = null;
         SpeechSynthesizer synthesizer = null;
+        log.info("Starting Aliyun streaming synthesis: voice={}, textLength={}", voice, text.length());
         try {
-            synthesizer = new SpeechSynthesizer(client, streamingListener(outputStream, failure, writeFailure));
+            client = credentials.createNlsClient();
+            synthesizer = new SpeechSynthesizer(client,
+                    streamingListener(outputStream, failure, writeFailure, firstAudioReceived, finished));
             synthesizer.setAppKey(credentials.appKey());
             synthesizer.setText(text);
             synthesizer.setFormat(OutputFormatEnum.MP3);
@@ -91,7 +102,7 @@ public class AliyunSpeechService {
             synthesizer.setPitchRate(0);
             synthesizer.setSpeechRate(0);
             synthesizer.start();
-            synthesizer.waitForComplete();
+            awaitStreamingCompletion(synthesizer, firstAudioReceived, finished);
             if (writeFailure.get() != null) {
                 throw writeFailure.get();
             }
@@ -99,12 +110,34 @@ public class AliyunSpeechService {
                 throw new IllegalStateException(failure.get());
             }
         } catch (Exception exception) {
+            log.error("Aliyun streaming synthesis failed: voice={}", voice, exception);
             throw new IllegalStateException("阿里云流式语音合成失败：" + exception.getMessage(), exception);
         } finally {
             if (synthesizer != null) {
                 synthesizer.close();
             }
-            client.shutdown();
+            if (client != null) {
+                client.shutdown();
+            }
+        }
+    }
+
+    static void awaitStreamingCompletion(SpeechSynthesizer synthesizer,
+                                         AtomicBoolean firstAudioReceived,
+                                         AtomicBoolean finished) throws Exception {
+        synthesizer.waitForComplete(FIRST_AUDIO_TIMEOUT_MILLIS);
+        if (!firstAudioReceived.get()) {
+            if (finished.get()) {
+                throw new IllegalStateException("阿里云未返回方言音频数据");
+            }
+            throw new IllegalStateException("阿里云方言语音首包等待超时");
+        }
+        if (!finished.get()) {
+            synthesizer.waitForComplete(
+                    STREAMING_COMPLETION_TIMEOUT_MILLIS - FIRST_AUDIO_TIMEOUT_MILLIS);
+        }
+        if (!finished.get()) {
+            throw new IllegalStateException("阿里云方言语音合成等待超时");
         }
     }
 
@@ -175,7 +208,9 @@ public class AliyunSpeechService {
 
     static SpeechSynthesizerListener streamingListener(OutputStream outputStream,
                                                        AtomicReference<String> failure,
-                                                       AtomicReference<IOException> writeFailure) {
+                                                       AtomicReference<IOException> writeFailure,
+                                                       AtomicBoolean firstAudioReceived,
+                                                       AtomicBoolean finished) {
         return new SpeechSynthesizerListener() {
             @Override
             public void onMessage(ByteBuffer message) {
@@ -184,6 +219,9 @@ public class AliyunSpeechService {
                 }
                 byte[] bytes = new byte[message.remaining()];
                 message.get(bytes);
+                if (firstAudioReceived.compareAndSet(false, true)) {
+                    log.info("Aliyun streaming synthesis received first audio chunk: bytes={}", bytes.length);
+                }
                 try {
                     outputStream.write(bytes);
                     outputStream.flush();
@@ -195,10 +233,16 @@ public class AliyunSpeechService {
             @Override
             public void onFail(SpeechSynthesizerResponse response) {
                 failure.set("taskId=" + response.getTaskId() + "，" + response.getStatusText());
+                finished.set(true);
+                log.warn("Aliyun streaming synthesis failed: taskId={}, status={}",
+                        response.getTaskId(), response.getStatusText());
             }
 
             @Override
-            public void onComplete(SpeechSynthesizerResponse response) { }
+            public void onComplete(SpeechSynthesizerResponse response) {
+                finished.set(true);
+                log.info("Aliyun streaming synthesis completed: taskId={}", response.getTaskId());
+            }
         };
     }
 

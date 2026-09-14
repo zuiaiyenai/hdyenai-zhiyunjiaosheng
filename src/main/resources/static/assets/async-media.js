@@ -6,6 +6,27 @@
     try{const data=JSON.parse(raw);return data.message||data.msg||raw||("请求失败（"+response.status+"）");}
     catch{return raw||("请求失败（"+response.status+"）");}
   }
+  function formatScore(value){
+    const score=Number(value);
+    return Number.isFinite(score)?score+" 分":"暂无";
+  }
+  function formatSpeakingEvaluation(data){
+    if(!data||typeof data!=="object")return typeof data==="string"?data:"暂无评测结果";
+    const marker="💡 改进建议：";
+    const feedback=String(data.feedback||"").trim();
+    const markerIndex=feedback.indexOf(marker);
+    const advice=(markerIndex>=0?feedback.slice(markerIndex+marker.length):feedback).trim()||"暂无改进建议";
+    return [
+      "评测结果",
+      "",
+      "流畅度："+formatScore(data.fluency),
+      "发音："+formatScore(data.pronunciation),
+      "准确率："+formatScore(data.accuracy),
+      "",
+      "改进建议：",
+      advice
+    ].join("\n");
+  }
   async function submitAndWait(path,form,onProgress){
     const api=config();
     const headers=api.token?{Authorization:"Bearer "+api.token}:{};
@@ -31,6 +52,7 @@
     }
     throw new Error("任务状态查询超时，请稍后重试");
   }
+  window.zyjsSubmitAndWait=submitAndWait;
   function panelByTitle(button,title){
     const panel=button.closest("article.panel,section.page");
     return panel&&panel.querySelector(".panel-title")?.textContent.trim()===title?panel:null;
@@ -66,7 +88,7 @@
     if(label==="提交评测"){
       const panel=panelByTitle(button,"口语评测");if(!panel)return false;
       const file=panel.querySelector('input[type="file"]')?.files?.[0];const text=panel.querySelector("textarea")?.value?.trim();const output=panel.querySelector("pre");
-      run(button,output,async progress=>{if(!file||!text)throw new Error("请填写参考文本并上传录音");const form=new FormData();form.append("file",file);form.append("text",text);form.append("mode","standard");form.append("language","zh");const response=await submitAndWait("/speaking_practice/evaluate",form,()=>progress("口语评测任务正在后台执行……"));output.textContent=JSON.stringify(await response.json(),null,2);});
+      run(button,output,async progress=>{if(!file||!text)throw new Error("请填写参考文本并上传录音");const form=new FormData();form.append("file",file);form.append("text",text);form.append("mode","standard");form.append("language","zh");const response=await submitAndWait("/speaking_practice/evaluate",form,()=>progress("口语评测任务正在后台执行……"));output.textContent=formatSpeakingEvaluation(await response.json());});
       return true;
     }
     if(label==="生成克隆语音"){

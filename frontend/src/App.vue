@@ -227,13 +227,34 @@ async function startDialogue() {
   })
   dialogue.value = data.text || data.message || data.dialogue || '对话已经开始，请根据提示练习。'
 }
+function formatScore(value) {
+  const score = Number(value)
+  return Number.isFinite(score) ? `${score} 分` : '暂无'
+}
+function formatSpeakingEvaluation(data) {
+  if (!data || typeof data !== 'object') return typeof data === 'string' ? data : '暂无评测结果'
+  const marker = '💡 改进建议：'
+  const feedback = String(data.feedback || '').trim()
+  const markerIndex = feedback.indexOf(marker)
+  const advice = (markerIndex >= 0 ? feedback.slice(markerIndex + marker.length) : feedback).trim() || '暂无改进建议'
+  return [
+    '评测结果',
+    '',
+    `流畅度：${formatScore(data.fluency)}`,
+    `发音：${formatScore(data.pronunciation)}`,
+    `准确率：${formatScore(data.accuracy)}`,
+    '',
+    '改进建议：',
+    advice
+  ].join('\n')
+}
 async function evaluate() {
   if (!speakingFile.value || !speakingText.value.trim()) throw new Error('请填写参考文本并上传录音')
   const task = await submitTask('/speaking_practice/evaluate', { method: 'POST', body: multipart([
     ['file', speakingFile.value], ['text', speakingText.value], ['mode', 'standard'], ['language', 'zh']
   ]) })
   const data = await taskResult(task.id)
-  speakingResult.value = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+  speakingResult.value = formatSpeakingEvaluation(data)
 }
 async function loadReport() {
   try {
@@ -286,7 +307,7 @@ onMounted(() => {
 
     <section v-show="page === 'assist'" class="page three">
       <article class="panel"><h2 class="panel-title">文本朗读</h2><div class="panel-body"><textarea v-model="summaryText" class="editor" placeholder="输入大文本内容……"></textarea><button class="primary" @click="run('summary', summarize)">智能摘要</button><pre class="result">{{ summaryResult }}</pre></div></article>
-      <article class="panel"><h2 class="panel-title">文件朗读</h2><div class="panel-body"><label class="drop">上传 TXT / DOCX<input type="file" @change="readFile = fileFrom($event)"></label><button class="primary" @click="run('read', parseFile)">解析文件</button><pre class="result">{{ readResult }}</pre></div></article>
+      <article class="panel"><h2 class="panel-title">文件朗读</h2><div class="panel-body"><label class="drop">上传 TXT / DOCX<input type="file" accept=".txt,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" @change="readFile = fileFrom($event)"></label><button class="primary" @click="run('read', parseFile)">解析文件</button><pre class="result">{{ readResult }}</pre></div></article>
       <article class="panel"><h2 class="panel-title">语音识别</h2><div class="panel-body"><label class="drop">上传录音<input type="file" accept="audio/*" @change="asrFile = fileFrom($event)"></label><button class="primary" @click="run('asr', transcribe)">开始转写</button><pre class="result">{{ asrResult }}</pre></div></article>
     </section>
     <section v-show="page === 'assist'" class="page panel mt">

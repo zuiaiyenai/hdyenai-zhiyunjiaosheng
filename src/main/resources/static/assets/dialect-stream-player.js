@@ -29,6 +29,12 @@
     await once(sourceBuffer, "updateend", "error");
   }
 
+  function tryPlay(audio) {
+    audio.play().catch(function () {
+      return null;
+    });
+  }
+
   async function errorMessage(response) {
     var message = await response.text();
     try {
@@ -39,7 +45,16 @@
     }
   }
 
+  function openLogin() {
+    var userButton = document.querySelector("header .user");
+    if (userButton) userButton.click();
+  }
+
   async function streamDialect(options) {
+    if (!options.token) {
+      openLogin();
+      throw new Error("请先登录后再生成方言语音");
+    }
     if (!window.MediaSource || !MediaSource.isTypeSupported("audio/mpeg")) {
       throw new Error("当前浏览器不支持 MP3 流式播放，请使用最新版 Chrome");
     }
@@ -47,12 +62,11 @@
     activeAbortController = new AbortController();
 
     var mediaSource = new MediaSource();
+    var sourceOpenPromise = once(mediaSource, "sourceopen", "error");
     if (activeMediaUrl) URL.revokeObjectURL(activeMediaUrl);
     activeMediaUrl = URL.createObjectURL(mediaSource);
     options.audio.src = activeMediaUrl;
-    var playPromise = options.audio.play().catch(function () {
-      return null;
-    });
+    tryPlay(options.audio);
 
     var headers = { "Content-Type": "application/json" };
     if (options.token) headers.Authorization = "Bearer " + options.token;
@@ -62,12 +76,19 @@
       body: JSON.stringify(options.body),
       signal: activeAbortController.signal
     });
+    if (response.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("role");
+      localStorage.removeItem("username");
+      openLogin();
+      throw new Error("登录已过期，请重新登录");
+    }
     if (!response.ok) {
       throw new Error(await errorMessage(response) || "方言流式合成失败：" + response.status);
     }
     if (!response.body) throw new Error("浏览器没有提供流式响应读取能力");
 
-    await once(mediaSource, "sourceopen", "error");
+    await sourceOpenPromise;
     var sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
     var reader = response.body.getReader();
     var started = false;
@@ -79,9 +100,8 @@
       await append(sourceBuffer, result.value);
       if (!started) {
         started = true;
-        await playPromise;
-        if (options.audio.paused) await options.audio.play();
         options.onStart();
+        if (options.audio.paused) tryPlay(options.audio);
       }
     }
     if (!started) throw new Error("阿里云没有返回方言音频数据");

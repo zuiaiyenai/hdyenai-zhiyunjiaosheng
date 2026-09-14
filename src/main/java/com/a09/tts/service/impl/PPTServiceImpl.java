@@ -2,22 +2,25 @@ package com.a09.tts.service.impl;
 
 import com.a09.tts.service.MoonshotChatClient;
 import com.a09.tts.service.PPTService;
+import org.apache.poi.hslf.usermodel.HSLFShape;
+import org.apache.poi.hslf.usermodel.HSLFSlide;
+import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.hslf.usermodel.HSLFTextShape;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFShape;
+import org.apache.poi.xslf.usermodel.XSLFSlide;
+import org.apache.poi.xslf.usermodel.XSLFTextShape;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.Locale;
-import java.util.Map;
 
 @Service
 public class PPTServiceImpl implements PPTService {
@@ -25,74 +28,71 @@ public class PPTServiceImpl implements PPTService {
     private static final Logger log = LoggerFactory.getLogger(PPTServiceImpl.class);
     private static final String RATE_LIMIT_MESSAGE = "当前使用人数较多，AI 服务暂时繁忙，请稍后重试。";
 
-    @Value("${moonshot.api.key:}")
-    private String apiKey;
-
-    @Value("${moonshot.api.base-url:https://api.moonshot.cn/v1}")
-    private String baseUrl;
-
     @Value("${moonshot.api.rate-limit-max-attempts:3}")
     private int rateLimitMaxAttempts = 3;
 
     @Value("${moonshot.api.rate-limit-retry-delay-ms:1000}")
     private long rateLimitRetryDelayMs = 1000;
 
-    private final RestTemplate restTemplate;
     private final MoonshotChatClient moonshotChatClient;
 
-    public PPTServiceImpl(RestTemplate restTemplate, MoonshotChatClient moonshotChatClient) {
-        this.restTemplate = restTemplate;
+    public PPTServiceImpl(MoonshotChatClient moonshotChatClient) {
         this.moonshotChatClient = moonshotChatClient;
     }
 
     public String processPptAndGenerateContent(MultipartFile file) throws IOException {
-        String fileId = uploadFile(file.getResource(), file.getOriginalFilename());
-        String fileContent = getFileContent(fileId);
-        return generateCoursewareContent(fileContent);
+        return generateCoursewareContent(
+                extractPptText(file.getResource(), file.getOriginalFilename()));
     }
 
     @Override
     public String processPptAndGenerateContent(Path file, String originalFilename) throws IOException {
-        String fileId = uploadFile(new FileSystemResource(file), originalFilename);
-        String fileContent = getFileContent(fileId);
-        return generateCoursewareContent(fileContent);
+        return generateCoursewareContent(
+                extractPptText(new org.springframework.core.io.FileSystemResource(file),
+                        originalFilename));
     }
 
-    private String uploadFile(Resource file, String originalFilename) throws IOException {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-        headers.setBearerAuth(apiKey);
-
-        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", file);
-        body.add("purpose", "file-extract");
-
-        HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-        try {
-            log.info("上传文件到 Moonshot: {}", originalFilename);
-            ResponseEntity<Map> response = restTemplate.postForEntity(
-                    baseUrl + "/files", requestEntity, Map.class);
-            return (String) response.getBody().get("id");
-        } catch (Exception e) {
-            log.error("Moonshot 文件上传失败: {}", e.getMessage());
-            throw new IOException("Moonshot 文件上传失败: " + e.getMessage());
+    private String extractPptText(Resource file, String originalFilename) throws IOException {
+        String filename = originalFilename == null ? "" : originalFilename.toLowerCase(Locale.ROOT);
+        StringBuilder content = new StringBuilder();
+        try (InputStream input = file.getInputStream()) {
+            if (filename.endsWith(".pptx")) {
+                try (XMLSlideShow show = new XMLSlideShow(input)) {
+                    int slideNumber = 1;
+                    for (XSLFSlide slide : show.getSlides()) {
+                        content.append("\n第 ").append(slideNumber++).append(" 页：\n");
+                        for (XSLFShape shape : slide.getShapes()) {
+                            if (shape instanceof XSLFTextShape textShape
+                                    && !textShape.getText().isBlank()) {
+                                content.append(textShape.getText().trim()).append('\n');
+                            }
+                        }
+                    }
+                }
+            } else if (filename.endsWith(".ppt")) {
+                try (HSLFSlideShow show = new HSLFSlideShow(input)) {
+                    int slideNumber = 1;
+                    for (HSLFSlide slide : show.getSlides()) {
+                        content.append("\n第 ").append(slideNumber++).append(" 页：\n");
+                        for (HSLFShape shape : slide.getShapes()) {
+                            if (shape instanceof HSLFTextShape textShape
+                                    && !textShape.getText().isBlank()) {
+                                content.append(textShape.getText().trim()).append('\n');
+                            }
+                        }
+                    }
+                }
+            } else {
+                throw new IllegalArgumentException("仅支持 PPT 或 PPTX 文件");
+            }
         }
-    }
-
-    private String getFileContent(String fileId) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setBearerAuth(apiKey);
-        HttpEntity<String> request = new HttpEntity<>(headers);
-        try {
-            log.info("获取 Moonshot 文件内容: {}", fileId);
-            ResponseEntity<String> response = restTemplate.exchange(
-                    baseUrl + "/files/" + fileId + "/content",
-                    HttpMethod.GET, request, String.class);
-            return response.getBody();
-        } catch (Exception e) {
-            log.error("Moonshot 文件内容获取失败: {}", e.getMessage());
-            return "";
+        String extracted = content.toString().trim();
+        if (extracted.isBlank()) {
+            throw new IllegalArgumentException("PPT 中没有可识别的文本内容");
         }
+        log.info("本地提取 PPT 文本完成: file={}, textLength={}", originalFilename,
+                extracted.length());
+        return extracted;
     }
 
     private String generateCoursewareContent(String fileContent) {

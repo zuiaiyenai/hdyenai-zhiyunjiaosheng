@@ -46,14 +46,15 @@ class VideoVoiceSwapServiceImplTest {
         VideoVoiceSwapServiceImpl service = new VideoVoiceSwapServiceImpl(null, null);
 
         List<String> command = service.buildMergeCommand(
-                "input.mp4", "voice.wav", "subtitles.srt", "output.mp4", 9.6 / 5.28);
+                "input.mp4", "voice.wav", "subtitles.srt", "output.mp4", 9.6 / 5.28, 5.28);
 
         assertTrue(command.indexOf("-vf") > command.lastIndexOf("-i"), command.toString());
         assertTrue(contains(command, "-map", "0:v:0", "-map", "1:a:0"), command.toString());
         assertTrue(contains(command, "-c:v", "libx264"), command.toString());
         assertTrue(contains(command, "-pix_fmt", "yuv420p"), command.toString());
-        assertTrue(contains(command, "-filter:a", "atempo=1.818182"), command.toString());
-        assertTrue(contains(command, "-c:a", "aac", "-shortest"), command.toString());
+        assertTrue(contains(command, "-filter:a", "atempo=1.818182,apad"), command.toString());
+        assertTrue(contains(command, "-c:a", "aac", "-t", "5.280000"), command.toString());
+        assertFalse(command.contains("-shortest"), command.toString());
         assertTrue(contains(command, "-movflags", "+faststart"), command.toString());
     }
 
@@ -62,7 +63,7 @@ class VideoVoiceSwapServiceImplTest {
         VideoVoiceSwapServiceImpl service = new VideoVoiceSwapServiceImpl(null, null);
 
         List<String> command = service.buildMergeCommand(
-                "input.mp4", "voice.wav", null, "output.mp4", 1.0);
+                "input.mp4", "voice.wav", null, "output.mp4", 1.0, 5.28);
 
         assertFalse(command.contains("-vf"), command.toString());
         assertTrue(contains(command, "-map", "0:v:0", "-map", "1:a:0"), command.toString());

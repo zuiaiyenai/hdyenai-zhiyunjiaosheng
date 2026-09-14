@@ -16,6 +16,8 @@ import org.apache.poi.hslf.usermodel.HSLFShape;
 import org.apache.poi.hslf.usermodel.HSLFSlide;
 import org.apache.poi.hslf.usermodel.HSLFSlideShow;
 import org.apache.poi.hslf.usermodel.HSLFTextShape;
+import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xslf.usermodel.XMLSlideShow;
 import org.apache.poi.xslf.usermodel.XSLFShape;
 import org.apache.poi.xslf.usermodel.XSLFSlide;
@@ -62,12 +64,21 @@ public class AccessibilityServiceImpl implements AccessibilityService {
     public Map<String, Object> readTextFile(MultipartFile file) throws Exception {
         uploadSecurity.validate(file, Type.TEXT);
         Map<String, Object> result = new HashMap<>();
-        String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        String fileName = file.getOriginalFilename();
+        String content;
+        if (fileName != null && fileName.toLowerCase(Locale.ROOT).endsWith(".docx")) {
+            try (XWPFDocument document = new XWPFDocument(file.getInputStream());
+                 XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+                content = extractor.getText().strip();
+            }
+        } else {
+            content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        }
         result.put("text", content);
-        result.put("fileName", file.getOriginalFilename());
+        result.put("fileName", fileName);
         result.put("textLength", content.length());
         result.put("message", "文件读取成功，已准备好进行语音合成朗读");
-        log.info("文件朗读 - 文件名: {}, 字数: {}", file.getOriginalFilename(), content.length());
+        log.info("文件朗读 - 文件名: {}, 字数: {}", fileName, content.length());
         return result;
     }
 

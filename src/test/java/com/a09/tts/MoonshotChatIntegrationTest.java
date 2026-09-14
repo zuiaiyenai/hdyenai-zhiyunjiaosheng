@@ -3,10 +3,14 @@ package com.a09.tts;
 import com.a09.tts.service.MoonshotChatClient;
 import com.a09.tts.service.impl.AccessibilityServiceImpl;
 import com.a09.tts.service.impl.PPTServiceImpl;
+import org.apache.poi.xslf.usermodel.XMLSlideShow;
+import org.apache.poi.xslf.usermodel.XSLFTextBox;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.web.client.RestTemplate;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,6 +21,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MoonshotChatIntegrationTest {
+    @TempDir
+    Path tempDir;
+
     @Test
     void stripsVersionSuffixBecauseSpringAiAppendsIt() {
         String moonshotUrl = ReflectionTestUtils.invokeMethod(MoonshotChatClient.class,
@@ -72,12 +79,33 @@ class MoonshotChatIntegrationTest {
         MoonshotChatClient client = mock(MoonshotChatClient.class);
         when(client.generate(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.contains("PPT正文"))).thenReturn("课件结果");
-        PPTServiceImpl service = new PPTServiceImpl(mock(RestTemplate.class), client);
+        PPTServiceImpl service = new PPTServiceImpl(client);
 
         String result = ReflectionTestUtils.invokeMethod(service,
                 "generateCoursewareContent", "PPT正文");
 
         assertThat(result).isEqualTo("课件结果");
+    }
+
+    @Test
+    void coursewareExtractsPptxLocallyBeforeCallingChat() throws Exception {
+        Path pptx = tempDir.resolve("lesson.pptx");
+        try (XMLSlideShow show = new XMLSlideShow()) {
+            XSLFTextBox textBox = show.createSlide().createTextBox();
+            textBox.setText("第一章 牛顿运动定律");
+            try (var output = Files.newOutputStream(pptx)) {
+                show.write(output);
+            }
+        }
+        MoonshotChatClient client = mock(MoonshotChatClient.class);
+        when(client.generate(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.contains("第一章 牛顿运动定律")))
+                .thenReturn("本地提取后的讲稿");
+        PPTServiceImpl service = new PPTServiceImpl(client);
+
+        String result = service.processPptAndGenerateContent(pptx, "lesson.pptx");
+
+        assertThat(result).isEqualTo("本地提取后的讲稿");
     }
 
     @Test
@@ -87,7 +115,7 @@ class MoonshotChatIntegrationTest {
                 org.mockito.ArgumentMatchers.anyString()))
                 .thenThrow(new IllegalStateException("429 rate_limit_reached_error"))
                 .thenReturn("重试后的课件结果");
-        PPTServiceImpl service = new PPTServiceImpl(mock(RestTemplate.class), client);
+        PPTServiceImpl service = new PPTServiceImpl(client);
         ReflectionTestUtils.setField(service, "rateLimitRetryDelayMs", 0L);
 
         String result = ReflectionTestUtils.invokeMethod(service,
@@ -104,7 +132,7 @@ class MoonshotChatIntegrationTest {
         when(client.generate(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString()))
                 .thenThrow(new IllegalStateException("Organization Rate limit exceeded, status 429"));
-        PPTServiceImpl service = new PPTServiceImpl(mock(RestTemplate.class), client);
+        PPTServiceImpl service = new PPTServiceImpl(client);
         ReflectionTestUtils.setField(service, "rateLimitRetryDelayMs", 0L);
 
         String result = ReflectionTestUtils.invokeMethod(service,
