@@ -76,6 +76,19 @@ class MultiInstanceDeploymentConfigTest {
         assertEquals(List.of("backend-1:9091", "backend-2:9091"), targets);
     }
 
+    @Test
+    void productionGateUsesBothBackendsAndCurrentDurableTaskSchema() throws Exception {
+        String workflow = Files.readString(Path.of(".github/workflows/ci.yml"));
+
+        assertTrue(workflow.contains("docker compose stop backend-1 backend-2"));
+        assertTrue(workflow.contains("task_type, payload_json, status, progress"));
+        assertTrue(workflow.contains("available_at, result_data, finished_at"));
+        assertTrue(workflow.contains("async_task_admission_lock"));
+        assertTrue(workflow.contains("stored_object_metadata"));
+        assertTrue(workflow.contains("docker compose start backend-1 backend-2"));
+        assertTrue(workflow.contains("127.0.0.1:9092/actuator/health/readiness"));
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> map(Object value) {
         return (Map<String, Object>) value;

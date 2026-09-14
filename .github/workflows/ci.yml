@@ -165,7 +165,7 @@ jobs:
             *) echo "Refusing to destroy non-dedicated schema: $DB_NAME" >&2; exit 1 ;;
           esac
 
-          docker compose stop backend-1
+          docker compose stop backend-1 backend-2
           fixture_project="$(python -c 'import uuid; print(uuid.uuid4())')"
           fixture_task="$(python -c 'import uuid; print(uuid.uuid4())')"
           fixture_sql="INSERT INTO voice
@@ -182,9 +182,10 @@ jobs:
             (project_id, revision_number, instruction, script)
             VALUES ('${fixture_project}', 1, 'qualification', 'qualification script');
             INSERT INTO async_task
-            (task_id, owner_username, task_type, status, progress, result_data, finished_at)
-            VALUES ('${fixture_task}', '${LOAD_TEST_USERNAME}', 'QUALIFICATION',
-                    'SUCCESS', 100, 'restored', CURRENT_TIMESTAMP);
+            (task_id, owner_username, task_type, payload_json, status, progress,
+             available_at, result_data, finished_at)
+            VALUES ('${fixture_task}', '${LOAD_TEST_USERNAME}', 'QUALIFICATION', '{}',
+                    'SUCCESS', 100, CURRENT_TIMESTAMP(6), 'restored', CURRENT_TIMESTAMP);
             INSERT INTO pending_file_cleanup (storage_type, relative_path)
             VALUES ('VOICE', 'qualification/missing.wav');"
           docker compose exec -T mysql sh -c \
@@ -196,6 +197,9 @@ jobs:
             UNION ALL SELECT "courseware_project", COUNT(*) FROM courseware_project
             UNION ALL SELECT "courseware_project_revision", COUNT(*) FROM courseware_project_revision
             UNION ALL SELECT "async_task", COUNT(*) FROM async_task
+            UNION ALL SELECT "async_task_user_slot", COUNT(*) FROM async_task_user_slot
+            UNION ALL SELECT "async_task_admission_lock", COUNT(*) FROM async_task_admission_lock
+            UNION ALL SELECT "stored_object_metadata", COUNT(*) FROM stored_object_metadata
             UNION ALL SELECT "pending_file_cleanup", COUNT(*) FROM pending_file_cleanup
             UNION ALL SELECT "flyway_schema_history", COUNT(*) FROM flyway_schema_history;'
           docker compose exec -T mysql sh -c \
@@ -228,9 +232,11 @@ jobs:
           diff --unified artifacts/phase11/backup-counts-before.tsv \
             artifacts/phase11/backup-counts-restored.tsv
 
-          docker compose start backend-1
+          docker compose start backend-1 backend-2
           timeout 240 bash -c \
             'until curl --fail --silent http://127.0.0.1:9091/actuator/health/readiness; do sleep 5; done'
+          timeout 240 bash -c \
+            'until curl --fail --silent http://127.0.0.1:9092/actuator/health/readiness; do sleep 5; done'
           login_status="$(curl --silent --output artifacts/phase11/post-restore-login.json \
             --write-out '%{http_code}' --header 'Content-Type: application/json' \
             --data "{\"username\":\"${LOAD_TEST_USERNAME}\",\"password\":\"${LOAD_TEST_PASSWORD}\"}" \
